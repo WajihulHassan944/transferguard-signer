@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+
+<!-- Inter Font -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+@page {
+  size: A4;
+  margin: 28mm 22mm 26mm 22mm;
+}
+
+body {
+  font-family: "Inter", Arial, Helvetica, sans-serif;
+  font-size: 13px;
+  color: #111;
+}
+
+.page {
+  page-break-after: always;
+}
+
+.page:last-child {
+  page-break-after: auto;
+}
+
+/* Header */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 26px;
+}
+
+.logo {
+  width: 120px;
+}
+
+.header-title {
+  text-align: right;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+/* Section titles */
+h2 {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 22px 0 10px;
+}
+
+/* Rows */
+.row {
+  display: flex;
+  margin: 6px 0;
+}
+
+.label {
+  width: 240px;
+  font-weight: 600;
+}
+
+.value {
+  flex: 1;
+}
+
+.mono {
+  font-family: "Courier New", Courier, monospace;
+  font-size: 12px;
+}
+
+/* Signature */
+.signature-box {
+  margin-top: 14px;
+  width: 50%;
+  border: 2px solid #222;
+  height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.signature-box img {
+  height: 85px;
+}
+
+/* Footer */
+.footer {
+  margin-top: 36px;
+  text-align: center;
+  font-size: 10.5px;
+  color: #444;
+  line-height: 1.4;
+}
+</style>
+</head>
+
+<body>
+
+<!-- ================= PAGE 1 ================= -->
+<div class="page">
+
+  <div class="header">
+    <img class="logo" src="https://transferguard.eu/assets/transferguard-logo-new.png" />
+    <div class="header-title">
+      CERTIFICATE OF EVIDENCE Legal Plan -<br />
+      Court Admissible Audit Trail
+    </div>
+  </div>
+
+  <h2>1. Transfer Summary</h2>
+
+  <div class="row"><div class="label">File Name:</div><div class="value">{{FILE_NAME}}</div></div>
+  <div class="row"><div class="label">SHA-256 Hash:</div><div class="value mono">{{SHA256}}</div></div>
+  <div class="row"><div class="label">File Size:</div><div class="value">{{FILE_SIZE}}</div></div>
+  <div class="row"><div class="label">Transfer Status:</div><div class="value">{{TRANSFER_STATUS}}</div></div>
+
+  <h2>2. Recipient Identity Verification (Veriff IDV)</h2>
+
+  <div class="row"><div class="label">Full Name (ID):</div><div class="value">{{RECIPIENT_NAME}}</div></div>
+  <div class="row"><div class="label">ID Document Type:</div><div class="value">{{ID_TYPE}}</div></div>
+  <div class="row"><div class="label">Document Number:</div><div class="value">{{ID_NUMBER}}</div></div>
+  <div class="row"><div class="label">Biometric Match:</div><div class="value">{{BIOMETRIC}}</div></div>
+  <div class="row"><div class="label">Veriff Session ID:</div><div class="value">{{VERIFF_SESSION}}</div></div>
+  <div class="row"><div class="label">Timestamp IDV:</div><div class="value">{{IDV_TIME}}</div></div>
+
+  <h2>3. Recipient Digital Signature</h2>
+
+  <p>
+    "I hereby acknowledge the receipt of the files mentioned in Section 1 in good order."
+  </p>
+
+  <div class="signature-box">
+    <img src="{{SIGNATURE_URL}}" />
+  </div>
+
+  <div style="margin-top:10px;">
+    Signature name: {{RECIPIENT_NAME}}<br />
+    Date {{SIGN_DATE}}
+  </div>
+
+  <div class="footer">
+    This "Certificate of Evidence" is generated following a successful biometric identity
+    verification and explicit digital signature.<br />
+    The document is cryptographically sealed via the TransferGuard Legal Engine (PDF Signing)
+    to ensure court-admissibility.<br /><br />
+    TransferGuard Legal Plan - Audit ID: {{AUDIT_ID}} — Page 1<br />
+    TransferGuard is part of PVG Technologies BV, The Netherlands
+  </div>
+</div>
+
+<!-- ================= PAGE 2 ================= -->
+<div class="page">
+
+  <div class="header">
+    <img class="logo" src="https://transferguard.eu/assets/transferguard-logo-new.png" />
+    <div class="header-title">
+      CERTIFICATE OF EVIDENCE Legal Plan -<br />
+      Court Admissible Audit Trail
+    </div>
+  </div>
+
+  <h2>4. Technical Audit Log</h2>
+
+  <div class="row"><div class="label">IP Address:</div><div class="value">{{IP}}</div></div>
+  <div class="row"><div class="label">Location:</div><div class="value">{{LOCATION}}</div></div>
+  <div class="row"><div class="label">Device / OS:</div><div class="value">{{DEVICE}}</div></div>
+  <div class="row"><div class="label">Browser:</div><div class="value">{{BROWSER}}</div></div>
+
+  <h2>5. Legal Compliance & Security</h2>
+
+  <div class="row"><div class="label">TSA Time-Stamp:</div><div class="value">Qualified Sectigo TSA - eIDAS Compliant</div></div>
+  <div class="row"><div class="label">Encryption:</div><div class="value">AES-256 End-to-End Encryption</div></div>
+  <div class="row"><div class="label">Terms Version:</div><div class="value">v1.4 (Active)</div></div>
+  <div class="row"><div class="label">Privacy Version:</div><div class="value">v1.2 (Active)</div></div>
+
+  <div class="footer">
+    TransferGuard Legal Plan - Audit ID: {{AUDIT_ID}} — Page 2<br />
+    TransferGuard is part of PVG Technologies BV, The Netherlands
+  </div>
+</div>
+
+</body>
+</html>
