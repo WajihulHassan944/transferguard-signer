@@ -6,69 +6,41 @@ export async function generatePDF(data) {
   const templatePath = path.resolve("signing-worker/template.html");
   let html = fs.readFileSync(templatePath, "utf8");
 
-  const escape = (v) =>
-    String(v ?? "") // render even if null
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;");
+  // Escape any HTML special chars, render null/undefined as empty string
+  const escape = (v) => String(v ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-  const formatDate = (d) =>
-    d ? new Date(d).toLocaleString("en-GB", { hour12: false }) + " CET" : "";
+  const formatDate = (d) => (d ? new Date(d).toLocaleString("en-GB", { hour12: false }) + " CET" : "");
 
   // ---------------------------
-  // Parse files_json
+  // Build file rows from data.files array
   // ---------------------------
-  let parsedFiles = [];
-  try {
-    const fileObj =
-      typeof data.files_json === "string"
-        ? JSON.parse(data.files_json)
-        : data.files_json;
-
-    if (fileObj) {
-      parsedFiles.push({
-        name: fileObj.name,
-        size: fileObj.size + " bytes",
-        hash: data.sha256_hash,
-      });
-    }
-  } catch (e) {
-    parsedFiles = [];
-  }
-
-  const fileRows = parsedFiles
-    .map(
-      (f, i) => `
-        <tr>
-          <td>${i + 1}</td>
-          <td>${escape(f.name)}</td>
-          <td>${escape(f.size)}</td>
-          <td class="mono">${escape(f.hash)}</td>
-        </tr>`
-    )
-    .join("");
+  const fileRows = (data.files || []).map((f, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${escape(f.name)}</td>
+      <td>${escape(f.size)} bytes</td>
+      <td class="mono">${escape(data.sha256_hash)}</td>
+    </tr>
+  `).join("");
 
   // ---------------------------
-  // Parse audit_log_json
+  // Parse audit_log_json for dynamic fields
   // ---------------------------
   let audit = {};
   try {
-    audit =
-      typeof data.audit_log_json === "string"
-        ? JSON.parse(data.audit_log_json)
-        : data.audit_log_json || {};
-  } catch (e) {
+    audit = typeof data.audit_log_json === "string" ? JSON.parse(data.audit_log_json) : data.audit_log_json || {};
+  } catch {
     audit = {};
   }
 
   // ---------------------------
-  // Replace template variables
+  // Replace template placeholders
   // ---------------------------
   html = html
     // File / Transfer Info
-    .replaceAll("{{FILE_NAME}}", escape(parsedFiles[0]?.name))
+    .replaceAll("{{FILE_NAME}}", escape(data.files?.[0]?.name))
     .replaceAll("{{SHA256}}", escape(data.sha256_hash))
-    .replaceAll("{{FILE_SIZE}}", escape(data.total_size_bytes + " bytes"))
+    .replaceAll("{{FILE_SIZE}}", escape(data.files?.[0]?.size + " bytes"))
     .replaceAll("{{TRANSFER_STATUS}}", escape(data.status))
 
     // Recipient / Identity (from API if exists)
@@ -79,31 +51,24 @@ export async function generatePDF(data) {
     .replaceAll("{{VERIFF_SESSION}}", escape(data.decryption_token))
     .replaceAll("{{IDV_TIME}}", formatDate(data.delivered_at))
 
-    // Signature (non-API fields — keep these dynamic)
+    // Signature (non-API dynamic fields)
     .replaceAll("{{SIGNATURE_URL}}", escape(data.signatureUrl))
     .replaceAll("{{SIGN_DATE}}", escape(data.signDate))
 
     // Audit / Access
     .replaceAll("{{IP}}", escape(data.last_access_ip ?? audit.ip_address))
-    .replaceAll(
-      "{{LOCATION}}",
-      escape(
-        [audit.city, audit.region, audit.country]
-          .filter(Boolean)
-          .join(", ")
-      )
-    )
+    .replaceAll("{{LOCATION}}", escape([audit.city, audit.region, audit.country].filter(Boolean).join(", ")))
     .replaceAll("{{DEVICE}}", escape(audit.device_type))
     .replaceAll("{{BROWSER}}", escape(audit.user_agent))
 
     // Audit ID (use transfer ID dynamically)
     .replaceAll("{{AUDIT_ID}}", escape(data.id))
 
-    // Inject file rows if template uses table body
+    // Inject file rows into template
     .replace("{{FILE_ROWS}}", fileRows);
 
   // ---------------------------
-  // Generate PDF
+  // Generate PDF with Puppeteer
   // ---------------------------
   const browser = await puppeteer.launch({
     headless: "new",
