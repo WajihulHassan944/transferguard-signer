@@ -1,6 +1,8 @@
+"use strict";
+
 import { PDFDocument, rgb } from "pdf-lib";
 import { plainAddPlaceholder } from "@signpdf/placeholder-plain";
-import { default as SignPdf } from "@signpdf/signpdf"; // Import SignPdf class
+import { default as SignPdf } from "@signpdf/signpdf"; // ✅ SignPdf class
 
 // pkcs11js is CommonJS → dynamic import
 const pkcs11js = (await import("pkcs11js")).default;
@@ -18,9 +20,9 @@ export async function signBuffer(pdfBuffer) {
 
   // 1️⃣ Add signature placeholder first (required by signpdf)
   const pdfWithPlaceholder = plainAddPlaceholder({
-    pdfBuffer, // use the original Buffer here!
+    pdfBuffer, // original Buffer
     reason: "TransferGuard Legal Seal",
-    signatureLength: 8192,
+    signatureLength: 8192, // reserve enough space
   });
 
   // Optional: draw visible rectangle using pdf-lib AFTER placeholder
@@ -37,7 +39,7 @@ export async function signBuffer(pdfBuffer) {
     color: rgb(1, 1, 1),
   });
 
-  const finalPdfBuffer = Buffer.from(await pdfDoc.save()); // ✅ Buffer for signing
+  const finalPdfBuffer = Buffer.from(await pdfDoc.save()); // ✅ Node.js Buffer for signing
 
   // 2️⃣ Initialize PKCS#11
   const pkcs11 = new pkcs11js.PKCS11();
@@ -66,7 +68,7 @@ export async function signBuffer(pdfBuffer) {
     const privateKey = privateKeys[0];
     if (!privateKey) throw new Error("Private key not found on token");
 
-    // 3️⃣ Custom signer function for signpdf
+    // 3️⃣ Custom signer function for SignPdf
     const signer = {
       sign: (data) => {
         pkcs11.C_SignInit(session, { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS }, privateKey);
@@ -76,9 +78,9 @@ export async function signBuffer(pdfBuffer) {
       },
     };
 
-    // 4️⃣ Instantiate SignPdf and use its sign method
+    // 4️⃣ Instantiate SignPdf class and sign
     const signPdfInstance = new SignPdf();
-    const signedPdf = await signPdfInstance.sign(finalPdfBuffer, signer); // Note: async/await for sign method
+    const signedPdf = signPdfInstance.sign(finalPdfBuffer, signer); // ✅ sync method, no await
 
     // 5️⃣ Cleanup PKCS#11 session
     pkcs11.C_Logout(session);
