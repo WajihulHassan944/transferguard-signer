@@ -31,11 +31,13 @@ export async function signBuffer(pdfBuffer) {
     borderWidth: 1,
     color: rgb(1, 1, 1),
   });
-  const pdfBytes = await pdfDoc.save();
+
+  // Save PDF → Uint8Array, then convert to Buffer
+  const pdfBytes = Buffer.from(await pdfDoc.save());
 
   // 2️⃣ Add signature placeholder (required by signpdf)
   const pdfWithPlaceholder = plainAddPlaceholder({
-    pdfBuffer: pdfBytes,
+    pdfBuffer: pdfBytes, // ✅ now a Node.js Buffer
     reason: "TransferGuard Legal Seal",
     signatureLength: 8192, // reserve enough space
   });
