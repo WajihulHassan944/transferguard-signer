@@ -85,12 +85,14 @@ export async function signBuffer(pdfBuffer) {
       privateKey
     );
 
-    // ❗ DO NOT allocate buffer
-    const signature = pkcs11.C_Sign(session, data);
+    // Allocate buffer slightly larger than key size
+    const sigBuffer = Buffer.alloc(256); // 2048-bit RSA = 256 bytes
 
-    console.log("📏 Signature length:", signature.length, "bytes");
+    const sigLen = pkcs11.C_Sign(session, data, sigBuffer);
 
-    return Buffer.from(signature);
+    console.log("📏 Signature length:", sigLen, "bytes");
+
+    return sigBuffer.slice(0, sigLen);
   }
 }
 
