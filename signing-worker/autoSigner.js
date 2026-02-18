@@ -32,7 +32,7 @@ const s3 = new S3Client({
 
 // ===== CRON JOB (every 2 minutes) =====
 export function startAutoSigner() {
-  cron.schedule("*/2 * * * *", async () => {
+  cron.schedule("*/1 * * * *", async () => {
     console.log("🔁 Checking for pending transfers...");
 
     try {
