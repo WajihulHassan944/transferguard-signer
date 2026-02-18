@@ -1,17 +1,10 @@
-"use strict";
-
 import { PDFDocument, rgb } from "pdf-lib";
 import { plainAddPlaceholder } from "@signpdf/placeholder-plain";
-import { default as SignPdf } from "@signpdf/signpdf"; // only to use instance sign method
+import { SignPdf } from "@signpdf/signpdf"; // named import of the class
 
 // pkcs11js is CommonJS → dynamic import
 const pkcs11js = (await import("pkcs11js")).default;
 
-/**
- * Sign a PDF buffer using a PKCS#11 token
- * @param {Buffer} pdfBuffer
- * @returns {Buffer} signed PDF
- */
 export async function signBuffer(pdfBuffer) {
   if (process.env.NODE_ENV === "development") {
     console.log("⚠️ Dev mode → skipping real signing");
@@ -25,7 +18,7 @@ export async function signBuffer(pdfBuffer) {
     signatureLength: 8192,
   });
 
-  // 2️⃣ Draw visible rectangle on first page
+  // 2️⃣ Draw visible rectangle
   const pdfDoc = await PDFDocument.load(pdfWithPlaceholder);
   const firstPage = pdfDoc.getPages()[0];
   firstPage.drawRectangle({
@@ -46,6 +39,7 @@ export async function signBuffer(pdfBuffer) {
   pkcs11.C_Initialize();
 
   let session;
+
   try {
     const slots = pkcs11.C_GetSlotList(true);
     if (!slots.length) throw new Error("No PKCS11 slots found");
@@ -75,7 +69,7 @@ export async function signBuffer(pdfBuffer) {
       },
     };
 
-    // 5️⃣ Use SignPdf instance properly
+    // 5️⃣ Instantiate SignPdf correctly
     const signPdf = new SignPdf();
     const signedPdf = signPdf.sign(finalPdfBuffer, signer);
 
