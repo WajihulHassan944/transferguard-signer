@@ -1,14 +1,14 @@
 "use strict";
 
-import crypto from "crypto";
 import { PDFDocument, rgb } from "pdf-lib";
+import { plainAddPlaceholder, sign } from "@signpdf/signpdf";
 
 // pkcs11js is CommonJS → dynamic import
 const pkcs11js = (await import("pkcs11js")).default;
 
 /**
- * Sign a PDF buffer using a PKCS#11 token
- * @param {Buffer} pdfBuffer - original PDF
+ * Sign a PDF buffer using a PKCS#11 token (PKCS#7-compliant)
+ * @param {Buffer} pdfBuffer
  * @returns {Buffer} signed PDF
  */
 export async function signBuffer(pdfBuffer) {
@@ -17,12 +17,12 @@ export async function signBuffer(pdfBuffer) {
     return pdfBuffer;
   }
 
-  // 1️⃣ Load PDF and add placeholder rectangle
+  // 1️⃣ Load PDF and add a proper placeholder for signpdf
   const pdfDoc = await PDFDocument.load(pdfBuffer);
   const pages = pdfDoc.getPages();
   const firstPage = pages[0];
 
-  // Draw a visible placeholder rectangle for signature (bottom-right)
+  // Optional: draw a visible rectangle for the signature field
   firstPage.drawRectangle({
     x: firstPage.getWidth() - 150,
     y: 50,
@@ -30,10 +30,17 @@ export async function signBuffer(pdfBuffer) {
     height: 60,
     borderColor: rgb(0, 0, 0),
     borderWidth: 1,
-    color: rgb(1, 1, 1), // white fill
+    color: rgb(1, 1, 1),
   });
 
-  const pdfWithPlaceholder = await pdfDoc.save();
+  const pdfBytes = await pdfDoc.save();
+
+  // Add PDF signature placeholder
+  const pdfWithPlaceholder = plainAddPlaceholder({
+    pdfBuffer: pdfBytes,
+    reason: "TransferGuard Legal Seal",
+    signatureLength: 8192,
+  });
 
   // 2️⃣ Initialize PKCS#11
   const pkcs11 = new pkcs11js.PKCS11();
@@ -50,39 +57,39 @@ export async function signBuffer(pdfBuffer) {
       slots[0],
       pkcs11js.CKF_SERIAL_SESSION | pkcs11js.CKF_RW_SESSION
     );
-
     pkcs11.C_Login(session, pkcs11js.CKU_USER, process.env.TOKEN_PIN);
 
-    // 3️⃣ Find the first private key
+    // 🔎 Find first private key on token
     pkcs11.C_FindObjectsInit(session, [
       { type: pkcs11js.CKA_CLASS, value: pkcs11js.CKO_PRIVATE_KEY },
     ]);
-
-    const privateKeys = pkcs11.C_FindObjects(session, 1); // 2 args ✅
+    const privateKeys = pkcs11.C_FindObjects(session, 1);
     pkcs11.C_FindObjectsFinal(session);
 
     const privateKey = privateKeys[0];
     if (!privateKey) throw new Error("Private key not found on token");
 
-    // 4️⃣ Sign the PDF buffer using the token (correct 3-arg usage)
-    pkcs11.C_SignInit(session, { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS }, privateKey);
+    // 3️⃣ Custom signer function for signpdf
+    const signer = {
+      sign: (data) => {
+        pkcs11.C_SignInit(session, { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS }, privateKey);
 
-    // Allocate signature buffer with max key size (e.g., 4096-bit RSA = 512 bytes)
-    const sigBuffer = Buffer.alloc(1024);
-    const sigLen = pkcs11.C_Sign(session, pdfWithPlaceholder, sigBuffer); // 3 args
+        // Allocate buffer for signature (max key size)
+        const sigBuffer = Buffer.alloc(1024);
+        const sigLen = pkcs11.C_Sign(data, sigBuffer);
+        return sigBuffer.slice(0, sigLen);
+      },
+    };
 
-    const signature = sigBuffer.slice(0, sigLen); // trim to actual signature length
+    // 4️⃣ Sign PDF (PKCS#7-compliant)
+    const signedPdf = sign(pdfWithPlaceholder, signer);
 
-    // 5️⃣ Append signature to PDF buffer (simple approach)
-    const signedPdfBuffer = Buffer.concat([pdfWithPlaceholder, signature]);
-
-    // 6️⃣ Clean up PKCS#11 session
+    // 5️⃣ Cleanup
     pkcs11.C_Logout(session);
     pkcs11.C_CloseSession(session);
     pkcs11.C_Finalize();
 
-    return signedPdfBuffer;
-
+    return signedPdf;
   } catch (err) {
     if (session) {
       try {
