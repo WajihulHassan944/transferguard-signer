@@ -3,7 +3,7 @@
 import { PDFDocument, rgb } from "pdf-lib";
 import { plainAddPlaceholder } from "@signpdf/placeholder-plain";
 import signpdf from "@signpdf/signpdf";
-
+console.log(signpdf);
 // pkcs11js is CommonJS → dynamic import
 const pkcs11js = (await import("pkcs11js")).default;
 
