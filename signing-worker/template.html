@@ -70,7 +70,11 @@ h2 {
 .mono {
   font-family: "Courier New", Courier, monospace;
   font-size: 12px;
+  word-break: break-all;      /* <-- allow long strings to wrap */
+  white-space: pre-wrap;      /* <-- keep spacing and wrap */
+  overflow-wrap: anywhere;    /* <-- extra safety for PDF rendering */
 }
+
 
 /* Signature */
 .signature-box {

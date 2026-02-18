@@ -68,7 +68,7 @@ export function startAutoSigner() {
         const transferData = {
   id: transfer.id, // used for {{AUDIT_ID}}
   sha256_hash: transfer.sha256_hash || transfer.encrypted_password,
-  status: transfer.status || "pending",
+  status: "downloaded",
   files: [
     {
       name: files?.name || "Unknown_File",
