@@ -58,18 +58,23 @@ export async function signBuffer(pdfBuffer) {
       { type: pkcs11js.CKA_CLASS, value: pkcs11js.CKO_PRIVATE_KEY },
     ]);
 
-    const privateKeys = pkcs11.C_FindObjects(session, 1); // only 2 arguments!
+    const privateKeys = pkcs11.C_FindObjects(session, 1); // 2 args ✅
     pkcs11.C_FindObjectsFinal(session);
 
     const privateKey = privateKeys[0];
     if (!privateKey) throw new Error("Private key not found on token");
 
-    // 4️⃣ Sign the PDF buffer using the token
+    // 4️⃣ Sign the PDF buffer using the token (correct 3-arg usage)
     pkcs11.C_SignInit(session, { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS }, privateKey);
-    const signature = pkcs11.C_Sign(session, pdfWithPlaceholder);
+
+    // Allocate signature buffer with max key size (e.g., 4096-bit RSA = 512 bytes)
+    const sigBuffer = Buffer.alloc(1024);
+    const sigLen = pkcs11.C_Sign(session, pdfWithPlaceholder, sigBuffer); // 3 args
+
+    const signature = sigBuffer.slice(0, sigLen); // trim to actual signature length
 
     // 5️⃣ Append signature to PDF buffer (simple approach)
-    const signedPdfBuffer = Buffer.concat([pdfWithPlaceholder, Buffer.from(signature)]);
+    const signedPdfBuffer = Buffer.concat([pdfWithPlaceholder, signature]);
 
     // 6️⃣ Clean up PKCS#11 session
     pkcs11.C_Logout(session);
