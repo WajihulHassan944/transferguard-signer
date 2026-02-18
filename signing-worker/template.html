@@ -95,6 +95,25 @@ h2 {
   color: #444;
   line-height: 1.4;
 }
+/* Watermark */
+body::before {
+  content: "";
+  position: fixed;           
+  top: 40%;                  /* 10% higher than center */
+  left: 50%;
+  width: 290px;              
+  height: 290px;
+  background-image: url('https://transferguard.eu/assets/transferguard-logo-new.png');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  opacity: 0.2;              
+  transform: translate(-50%, -50%) rotate(-25deg); /* still centered on left/right and rotated */
+  z-index: -1;               
+  pointer-events: none;      
+}
+
+
 </style>
 </head>
 
