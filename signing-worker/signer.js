@@ -1,12 +1,19 @@
-import { PDFDocument, rgb } from 'pdf-lib';
-import crypto from 'crypto';
+"use strict";
+
+import crypto from "crypto";
+import { PDFDocument, rgb } from "pdf-lib";
 
 // pkcs11js is CommonJS → dynamic import
-const pkcs11js = (await import('pkcs11js')).default;
+const pkcs11js = (await import("pkcs11js")).default;
 
+/**
+ * Sign a PDF buffer using a PKCS#11 token
+ * @param {Buffer} pdfBuffer - original PDF
+ * @returns {Buffer} signed PDF
+ */
 export async function signBuffer(pdfBuffer) {
-  if (process.env.NODE_ENV === 'development') {
-    console.log('⚠️ Dev mode → skipping real signing');
+  if (process.env.NODE_ENV === "development") {
+    console.log("⚠️ Dev mode → skipping real signing");
     return pdfBuffer;
   }
 
@@ -15,20 +22,20 @@ export async function signBuffer(pdfBuffer) {
   const pages = pdfDoc.getPages();
   const firstPage = pages[0];
 
-  // Draw a visible or invisible rectangle for signature (here bottom-right)
+  // Draw a visible placeholder rectangle for signature (bottom-right)
   firstPage.drawRectangle({
     x: firstPage.getWidth() - 150,
     y: 50,
-    width: 100,
-    height: 50,
-    color: rgb(1, 1, 1),
+    width: 120,
+    height: 60,
     borderColor: rgb(0, 0, 0),
     borderWidth: 1,
+    color: rgb(1, 1, 1), // white fill
   });
 
   const pdfWithPlaceholder = await pdfDoc.save();
 
-  // 2️⃣ Initialize PKCS11
+  // 2️⃣ Initialize PKCS#11
   const pkcs11 = new pkcs11js.PKCS11();
   pkcs11.load(process.env.PKCS11_LIB);
   pkcs11.C_Initialize();
@@ -37,7 +44,7 @@ export async function signBuffer(pdfBuffer) {
 
   try {
     const slots = pkcs11.C_GetSlotList(true);
-    if (!slots.length) throw new Error('No PKCS11 slots found');
+    if (!slots.length) throw new Error("No PKCS11 slots found");
 
     session = pkcs11.C_OpenSession(
       slots[0],
@@ -46,21 +53,25 @@ export async function signBuffer(pdfBuffer) {
 
     pkcs11.C_Login(session, pkcs11js.CKU_USER, process.env.TOKEN_PIN);
 
-    const [privateKey] = pkcs11.C_FindObjects(
-      session,
-      [{ type: pkcs11js.CKA_CLASS, value: pkcs11js.CKO_PRIVATE_KEY }],
-      1
-    );
+    // 3️⃣ Find the first private key
+    pkcs11.C_FindObjectsInit(session, [
+      { type: pkcs11js.CKA_CLASS, value: pkcs11js.CKO_PRIVATE_KEY },
+    ]);
 
-    if (!privateKey) throw new Error('Private key not found');
+    const privateKeys = pkcs11.C_FindObjects(session, 1); // only 2 arguments!
+    pkcs11.C_FindObjectsFinal(session);
 
-    // 3️⃣ Sign PDF buffer
+    const privateKey = privateKeys[0];
+    if (!privateKey) throw new Error("Private key not found on token");
+
+    // 4️⃣ Sign the PDF buffer using the token
     pkcs11.C_SignInit(session, { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS }, privateKey);
     const signature = pkcs11.C_Sign(session, pdfWithPlaceholder);
 
-    // 4️⃣ Append signature to PDF (basic example, you can implement PKCS#7 container)
+    // 5️⃣ Append signature to PDF buffer (simple approach)
     const signedPdfBuffer = Buffer.concat([pdfWithPlaceholder, Buffer.from(signature)]);
 
+    // 6️⃣ Clean up PKCS#11 session
     pkcs11.C_Logout(session);
     pkcs11.C_CloseSession(session);
     pkcs11.C_Finalize();
