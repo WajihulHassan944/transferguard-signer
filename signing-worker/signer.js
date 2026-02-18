@@ -43,14 +43,20 @@ export async function signBuffer(pdfBuffer) {
     if (!privateKey) throw new Error("Private key not found on token");
 
     // 4️⃣ PKCS#11 signer class
-    class PKCS11Signer extends Signer {
-      async sign(data) {
-        pkcs11.C_SignInit(session, { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS }, privateKey);
-        const sigBuffer = Buffer.alloc(8192); // must match placeholder
-        const sigLen = pkcs11.C_Sign(data, sigBuffer);
-        return sigBuffer.slice(0, sigLen);
-      }
-    }
+// 4️⃣ PKCS#11 signer class
+class PKCS11Signer extends Signer {
+  async sign(data) {
+    // Initialize the signing operation with the correct mechanism
+    pkcs11.C_SignInit(session, { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS }, privateKey);
+    
+    // Allocate a buffer to hold the signature
+    const sigBuffer = Buffer.alloc(8192); // must match placeholder size
+    const sigLen = pkcs11.C_Sign(session, data, sigBuffer); // Provide session, data, and buffer
+    
+    return sigBuffer.slice(0, sigLen); // Slice to the length of the signature
+  }
+}
+
 
     const signerInstance = new PKCS11Signer();
 
