@@ -1,21 +1,14 @@
 import { PDFDocument, rgb } from "pdf-lib";
 import { plainAddPlaceholder } from "@signpdf/placeholder-plain";
-import { SignPdf, Signer } from "@signpdf/signpdf"; // ✅ named imports
+import { SignPdf, Signer } from "@signpdf/signpdf";
 
 const pkcs11js = (await import("pkcs11js")).default;
 
 export async function signBuffer(pdfBuffer) {
   if (process.env.NODE_ENV === "development") return pdfBuffer;
 
-  // 1️⃣ Add placeholder
-  const pdfWithPlaceholder = plainAddPlaceholder({
-    pdfBuffer,
-    reason: "TransferGuard Legal Seal",
-    signatureLength: 8192,
-  });
-
-  // 2️⃣ Draw visible rectangle
-  const pdfDoc = await PDFDocument.load(pdfWithPlaceholder);
+  // 1️⃣ Load PDF and draw visible rectangle
+  const pdfDoc = await PDFDocument.load(pdfBuffer);
   const firstPage = pdfDoc.getPages()[0];
   firstPage.drawRectangle({
     x: firstPage.getWidth() - 150,
@@ -26,9 +19,18 @@ export async function signBuffer(pdfBuffer) {
     borderWidth: 1,
     color: rgb(1, 1, 1),
   });
-  const finalPdfBuffer = Buffer.from(await pdfDoc.save());
 
-  // 3️⃣ Initialize PKCS#11
+  // 2️⃣ Save PDF after modifications
+  const modifiedPdfBuffer = Buffer.from(await pdfDoc.save());
+
+  // 3️⃣ Add signature placeholder AFTER all modifications
+  const pdfWithPlaceholder = plainAddPlaceholder({
+    pdfBuffer: modifiedPdfBuffer,
+    reason: "TransferGuard Legal Seal",
+    signatureLength: 8192,
+  });
+
+  // 4️⃣ Initialize PKCS#11
   const pkcs11 = new pkcs11js.PKCS11();
   pkcs11.load(process.env.PKCS11_LIB);
   pkcs11.C_Initialize();
@@ -52,7 +54,7 @@ export async function signBuffer(pdfBuffer) {
     const privateKey = privateKeys[0];
     if (!privateKey) throw new Error("Private key not found");
 
-    // 4️⃣ Create a proper Signer class instance
+    // 5️⃣ Custom Signer
     class PKCS11Signer extends Signer {
       async sign(data) {
         pkcs11.C_SignInit(session, { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS }, privateKey);
@@ -64,11 +66,11 @@ export async function signBuffer(pdfBuffer) {
 
     const signerInstance = new PKCS11Signer();
 
-    // 5️⃣ Sign PDF
+    // 6️⃣ Sign PDF
     const signPdf = new SignPdf();
-    const signedPdf = await signPdf.sign(finalPdfBuffer, signerInstance);
+    const signedPdf = await signPdf.sign(pdfWithPlaceholder, signerInstance);
 
-    // 6️⃣ Cleanup
+    // 7️⃣ Cleanup
     pkcs11.C_Logout(session);
     pkcs11.C_CloseSession(session);
     pkcs11.C_Finalize();
