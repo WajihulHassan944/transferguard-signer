@@ -32,7 +32,7 @@ const s3 = new S3Client({
 
 // ===== CRON JOB (every 2 minutes) =====
 export function startAutoSigner() {
-  cron.schedule("*/1 * * * *", async () => {
+  cron.schedule("*/2 * * * *", async () => {
     console.log("🔁 Checking for pending transfers...");
 
     try {
@@ -65,25 +65,27 @@ export function startAutoSigner() {
           }
 
           // ===== Build dynamic transferData for PDF =====
-          const transferData = {
-            sha256: transfer.sha256_hash || transfer.encrypted_password,
-            fileSize: transfer.total_size_bytes,
-            files: [files],
-            recipient: {
-              name: transfer.recipient_email,
-              idType: transfer.security_level || null,
-              idNumber: transfer.dossier_number || null,
-              biometric: transfer.qerds_certified || null,
-              veriffSession: transfer.decryption_token || null,
-              idvTime: transfer.delivered_at || null,
-            },
-            signatureUrl: transfer.signatureUrl || "https://transferguard.com/signature.png",
-            signDate: transfer.signDate || new Date().toISOString(),
-            ip: transfer.last_access_ip || audit.ip_address || "0.0.0.0",
-            location: [audit.city, audit.region, audit.country].filter(Boolean).join(", "),
-            device: audit.device_type || "unknown",
-            browser: audit.user_agent || "unknown",
-          };
+        const transferData = {
+  id: transfer.id, // used for {{AUDIT_ID}}
+  sha256_hash: transfer.sha256_hash || transfer.encrypted_password,
+  status: transfer.status || "pending",
+  files: [
+    {
+      name: files?.name || "Unknown_File",
+      size: files?.size || 0,
+    },
+  ],
+  recipient_email: transfer.recipient_email || "Unknown Recipient",
+  security_level: transfer.security_level || "",
+  dossier_number: transfer.dossier_number || "",
+  qerds_certified: transfer.qerds_certified || "",
+  decryption_token: transfer.decryption_token || "",
+  delivered_at: transfer.delivered_at || null,
+  signatureUrl: transfer.signatureUrl || "https://transferguard.com/signature.png",
+  signDate: transfer.signDate || new Date().toISOString(),
+  last_access_ip: transfer.last_access_ip || audit.ip_address || "0.0.0.0",
+  audit_log_json: transfer.audit_log_json || null,
+};
 
           // 1️⃣ Generate PDF
           const pdfBuffer = await generatePDF(transferData);
