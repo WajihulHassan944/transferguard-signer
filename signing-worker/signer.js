@@ -1,7 +1,8 @@
 "use strict";
 
 import { PDFDocument, rgb } from "pdf-lib";
-import { plainAddPlaceholder, sign } from "@signpdf/signpdf";
+import placeholder from "@signpdf/placeholder-plain"; // ✅ placeholder helper
+import signpdf from "@signpdf/signpdf"; // ✅ default export for signing
 
 // pkcs11js is CommonJS → dynamic import
 const pkcs11js = (await import("pkcs11js")).default;
@@ -17,12 +18,10 @@ export async function signBuffer(pdfBuffer) {
     return pdfBuffer;
   }
 
-  // 1️⃣ Load PDF and add a proper placeholder for signpdf
+  // 1️⃣ Load PDF and optionally draw visible rectangle for signature field
   const pdfDoc = await PDFDocument.load(pdfBuffer);
   const pages = pdfDoc.getPages();
   const firstPage = pages[0];
-
-  // Optional: draw a visible rectangle for the signature field
   firstPage.drawRectangle({
     x: firstPage.getWidth() - 150,
     y: 50,
@@ -32,17 +31,16 @@ export async function signBuffer(pdfBuffer) {
     borderWidth: 1,
     color: rgb(1, 1, 1),
   });
-
   const pdfBytes = await pdfDoc.save();
 
-  // Add PDF signature placeholder
-  const pdfWithPlaceholder = plainAddPlaceholder({
+  // 2️⃣ Add signature placeholder (required by signpdf)
+  const pdfWithPlaceholder = placeholder({
     pdfBuffer: pdfBytes,
     reason: "TransferGuard Legal Seal",
-    signatureLength: 8192,
+    signatureLength: 8192, // reserve enough space
   });
 
-  // 2️⃣ Initialize PKCS#11
+  // 3️⃣ Initialize PKCS#11
   const pkcs11 = new pkcs11js.PKCS11();
   pkcs11.load(process.env.PKCS11_LIB);
   pkcs11.C_Initialize();
@@ -69,7 +67,7 @@ export async function signBuffer(pdfBuffer) {
     const privateKey = privateKeys[0];
     if (!privateKey) throw new Error("Private key not found on token");
 
-    // 3️⃣ Custom signer function for signpdf
+    // 4️⃣ Custom signer function for signpdf
     const signer = {
       sign: (data) => {
         pkcs11.C_SignInit(session, { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS }, privateKey);
@@ -81,10 +79,10 @@ export async function signBuffer(pdfBuffer) {
       },
     };
 
-    // 4️⃣ Sign PDF (PKCS#7-compliant)
-    const signedPdf = sign(pdfWithPlaceholder, signer);
+    // 5️⃣ Sign PDF (PKCS#7-compliant)
+    const signedPdf = signpdf.sign(pdfWithPlaceholder, signer);
 
-    // 5️⃣ Cleanup
+    // 6️⃣ Cleanup PKCS#11 session
     pkcs11.C_Logout(session);
     pkcs11.C_CloseSession(session);
     pkcs11.C_Finalize();
