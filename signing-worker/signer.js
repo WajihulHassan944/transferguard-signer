@@ -15,7 +15,7 @@ export async function signBuffer(pdfBuffer) {
   const pdfWithPlaceholder = plainAddPlaceholder({
     pdfBuffer,
     reason: "TransferGuard Legal Seal",
-    signatureLength: 8192,
+    signatureLength: 256,
   });
 
   console.log("✅ Placeholder added");
@@ -86,11 +86,13 @@ export async function signBuffer(pdfBuffer) {
     );
 
     // DO NOT allocate buffer
-    const signature = pkcs11.C_Sign(session, data);
+  const sigBuffer = Buffer.alloc(256); // 2048-bit key = 256 bytes
+const sigLen = pkcs11.C_Sign(session, data, sigBuffer);
 
-    console.log("📏 Signature length:", signature.length, "bytes");
+console.log("📏 Signature length:", sigLen, "bytes");
 
-    return Buffer.from(signature);
+return sigBuffer.slice(0, sigLen);
+
   }
 }
 
