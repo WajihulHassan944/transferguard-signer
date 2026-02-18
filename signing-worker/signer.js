@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import SignPdf from "@signpdf/signpdf";
-import plainAddPlaceholder from "@signpdf/placeholder-pdf-lib";
+import { plainAddPlaceholder } from "@signpdf/placeholder-pdf-lib";
 
 // pkcs11js is CommonJS → dynamic import
 const pkcs11js = (await import("pkcs11js")).default;
