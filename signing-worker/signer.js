@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import SignPdf from "@signpdf/signpdf";
+import { SignPdf } from "@signpdf/signpdf";
 import { PDFDocument } from "pdf-lib";
 
 // pkcs11js is CommonJS → dynamic import
@@ -27,7 +27,6 @@ export async function signBuffer(pdfBuffer) {
     color: undefined,
   });
 
-  // Serialize PDF back to buffer
   const pdfWithPlaceholder = await pdfDoc.save();
 
   // 2️⃣ Create PKCS11 instance
@@ -74,8 +73,8 @@ export async function signBuffer(pdfBuffer) {
       },
     };
 
-    const signPdf = new SignPdf();
-    const signedPdf = signPdf.sign(pdfWithPlaceholder, signer);
+    // ✅ Use static method sign() in v3
+    const signedPdf = SignPdf.sign(pdfWithPlaceholder, signer);
 
     pkcs11.C_Logout(session);
     pkcs11.C_CloseSession(session);
