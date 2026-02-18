@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import SignPdf from "@signpdf/signpdf";
-import { plainAddPlaceholder } from "@signpdf/placeholder-pdf-lib";
+import { addPlaceholder } from "@signpdf/placeholder-pdf-lib";
 
 // pkcs11js is CommonJS → dynamic import
 const pkcs11js = (await import("pkcs11js")).default;
@@ -12,11 +12,13 @@ export async function signBuffer(pdfBuffer) {
   }
 
   // 1️⃣ Add signature placeholder
-  const pdfWithPlaceholder = plainAddPlaceholder({
-    pdfBuffer,
-    reason: "TransferGuard Legal Seal",
-    signatureLength: 8192, // reserve space
-  });
+// 1️⃣ Add signature placeholder
+const pdfWithPlaceholder = addPlaceholder({
+  pdfBuffer,
+  reason: "TransferGuard Legal Seal",
+  signatureLength: 8192, // reserve space
+});
+
 
   // 2️⃣ Create PKCS11 instance
   const pkcs11 = new pkcs11js.PKCS11();
