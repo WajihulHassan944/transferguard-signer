@@ -53,25 +53,36 @@ export function startAutoSigner() {
 
           const files = JSON.parse(transfer.files_json || "{}");
 
-          // ===== BUILD STATIC DATA (you said keep static if missing) =====
+          // ===== Parse audit_log_json for dynamic fields =====
+          let audit = {};
+          try {
+            audit =
+              typeof transfer.audit_log_json === "string"
+                ? JSON.parse(transfer.audit_log_json)
+                : transfer.audit_log_json || {};
+          } catch {
+            audit = {};
+          }
+
+          // ===== Build dynamic transferData for PDF =====
           const transferData = {
-            sha256: transfer.sha256_hash || "STATIC_SHA256_PLACEHOLDER",
+            sha256: transfer.sha256_hash || transfer.encrypted_password,
             fileSize: transfer.total_size_bytes,
             files: [files],
             recipient: {
               name: transfer.recipient_email,
-              idType: "Passport",
-              idNumber: "X1234567",
-              biometric: "Face Match 98%",
-              veriffSession: "STATIC-SESSION-123",
-              idvTime: new Date().toISOString(),
+              idType: transfer.security_level || null,
+              idNumber: transfer.dossier_number || null,
+              biometric: transfer.qerds_certified || null,
+              veriffSession: transfer.decryption_token || null,
+              idvTime: transfer.delivered_at || null,
             },
-            signatureUrl: "https://transferguard.com/signature.png",
-            signDate: new Date().toISOString(),
-            ip: transfer.last_access_ip || "0.0.0.0",
-            location: "Germany",
-            device: "Desktop",
-            browser: "Chrome",
+            signatureUrl: transfer.signatureUrl || "https://transferguard.com/signature.png",
+            signDate: transfer.signDate || new Date().toISOString(),
+            ip: transfer.last_access_ip || audit.ip_address || "0.0.0.0",
+            location: [audit.city, audit.region, audit.country].filter(Boolean).join(", "),
+            device: audit.device_type || "unknown",
+            browser: audit.user_agent || "unknown",
           };
 
           // 1️⃣ Generate PDF
