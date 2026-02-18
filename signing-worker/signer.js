@@ -1,8 +1,6 @@
-"use strict";
-
 import { PDFDocument, rgb } from "pdf-lib";
 import { plainAddPlaceholder } from "@signpdf/placeholder-plain";
-import { default as SignPdf } from "@signpdf/signpdf"; // ✅ SignPdf class
+import { default as SignPdf } from "@signpdf/signpdf"; // Import SignPdf directly
 
 // pkcs11js is CommonJS → dynamic import
 const pkcs11js = (await import("pkcs11js")).default;
@@ -78,9 +76,8 @@ export async function signBuffer(pdfBuffer) {
       },
     };
 
-    // 4️⃣ Instantiate SignPdf class and sign
-    const signPdfInstance = new SignPdf();
-    const signedPdf = signPdfInstance.sign(finalPdfBuffer, signer); // ✅ sync method, no await
+    // 4️⃣ Sign PDF using the SignPdf object (not as a constructor)
+    const signedPdf = SignPdf.sign(finalPdfBuffer, signer); // Directly use SignPdf
 
     // 5️⃣ Cleanup PKCS#11 session
     pkcs11.C_Logout(session);
