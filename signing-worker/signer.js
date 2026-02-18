@@ -1,7 +1,7 @@
 "use strict";
 
 import { PDFDocument, rgb } from "pdf-lib";
-import placeholder from "@signpdf/placeholder-plain"; // ✅ placeholder helper
+import { plainAddPlaceholder } from "@signpdf/placeholder-plain"; // ✅ named import
 import signpdf from "@signpdf/signpdf"; // ✅ default export for signing
 
 // pkcs11js is CommonJS → dynamic import
@@ -34,7 +34,7 @@ export async function signBuffer(pdfBuffer) {
   const pdfBytes = await pdfDoc.save();
 
   // 2️⃣ Add signature placeholder (required by signpdf)
-  const pdfWithPlaceholder = placeholder({
+  const pdfWithPlaceholder = plainAddPlaceholder({
     pdfBuffer: pdfBytes,
     reason: "TransferGuard Legal Seal",
     signatureLength: 8192, // reserve enough space
