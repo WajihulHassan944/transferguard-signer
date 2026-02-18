@@ -1,9 +1,10 @@
 import crypto from "crypto";
 import SignPdf from "@signpdf/signpdf";
-import { addPlaceholder } from "@signpdf/placeholder-pdf-lib";
+import { PDFDocument } from "pdf-lib";
 
 // pkcs11js is CommonJS → dynamic import
 const pkcs11js = (await import("pkcs11js")).default;
+
 export async function signBuffer(pdfBuffer) {
 
   if (process.env.NODE_ENV === "development") {
@@ -11,14 +12,23 @@ export async function signBuffer(pdfBuffer) {
     return pdfBuffer;
   }
 
-  // 1️⃣ Add signature placeholder
-// 1️⃣ Add signature placeholder
-const pdfWithPlaceholder = addPlaceholder({
-  pdfBuffer,
-  reason: "TransferGuard Legal Seal",
-  signatureLength: 8192, // reserve space
-});
+  // 1️⃣ Add signature placeholder using pdf-lib
+  const pdfDoc = await PDFDocument.load(pdfBuffer);
+  const pages = pdfDoc.getPages();
+  const firstPage = pages[0];
 
+  // Reserve a rectangle somewhere on first page (required by signpdf)
+  firstPage.drawRectangle({
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    borderColor: undefined,
+    color: undefined,
+  });
+
+  // Serialize PDF back to buffer
+  const pdfWithPlaceholder = await pdfDoc.save();
 
   // 2️⃣ Create PKCS11 instance
   const pkcs11 = new pkcs11js.PKCS11();
@@ -53,7 +63,6 @@ const pdfWithPlaceholder = addPlaceholder({
     // 3️⃣ Custom signer for signpdf
     const signer = {
       sign: (data) => {
-
         pkcs11.C_SignInit(
           session,
           { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS },
@@ -61,7 +70,6 @@ const pdfWithPlaceholder = addPlaceholder({
         );
 
         const signature = pkcs11.C_Sign(session, data);
-
         return Buffer.from(signature);
       },
     };
@@ -76,7 +84,6 @@ const pdfWithPlaceholder = addPlaceholder({
     return signedPdf;
 
   } catch (err) {
-
     try {
       if (session) {
         pkcs11.C_Logout(session);
@@ -84,7 +91,6 @@ const pdfWithPlaceholder = addPlaceholder({
       }
       pkcs11.C_Finalize();
     } catch (_) {}
-
     throw err;
   }
 }
