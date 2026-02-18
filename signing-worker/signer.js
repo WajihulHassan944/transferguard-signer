@@ -74,26 +74,26 @@ export async function signBuffer(pdfBuffer) {
     );
 
     // 4️⃣ Signer class
-    class PKCS11Signer extends Signer {
-      async sign(data) {
-        console.log("✍️ Signing data...");
-        console.log("📦 Data length:", data.length);
+  class PKCS11Signer extends Signer {
+  async sign(data) {
+    console.log("✍️ Signing data...");
+    console.log("📦 Data length:", data.length);
 
-        pkcs11.C_SignInit(
-          session,
-          { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS },
-          privateKey
-        );
+    pkcs11.C_SignInit(
+      session,
+      { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS },
+      privateKey
+    );
 
-        const sigBuffer = Buffer.alloc(8192);
-        const sigLen = pkcs11.C_Sign(session, data, sigBuffer);
+    // ❗ DO NOT allocate buffer
+    const signature = pkcs11.C_Sign(session, data);
 
-        console.log("✅ Signature created");
-        console.log("📏 Signature length:", sigLen, "bytes");
+    console.log("📏 Signature length:", signature.length, "bytes");
 
-        return sigBuffer.slice(0, sigLen);
-      }
-    }
+    return Buffer.from(signature);
+  }
+}
+
 
     const signerInstance = new PKCS11Signer();
 
