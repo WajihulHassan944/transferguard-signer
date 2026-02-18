@@ -1,13 +1,11 @@
 import crypto from "crypto";
 import SignPdf from "@signpdf/signpdf";
-import placeholderPkg from "@signpdf/placeholder-pdf-lib";
+import * as placeholderPkg from "@signpdf/placeholder-pdf-lib";
 
-// Fix for CommonJS import
-const plainAddPlaceholder = placeholderPkg.default ?? placeholderPkg;
+const { plainAddPlaceholder } = placeholderPkg;
 
-// pkcs11js is CommonJS too → must load dynamically
+// pkcs11js is CommonJS → dynamic import
 const pkcs11js = (await import("pkcs11js")).default;
-
 export async function signBuffer(pdfBuffer) {
 
   if (process.env.NODE_ENV === "development") {
