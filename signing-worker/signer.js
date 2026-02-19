@@ -1,25 +1,23 @@
 import { plainAddPlaceholder } from "@signpdf/placeholder-plain";
 import { SignPdf } from "@signpdf/signpdf";
-import { Signer } from "@signpdf/utils"; // <--- Add this import
+import { Signer } from "@signpdf/utils";
 import { spawnSync } from "child_process";
 import fs from "fs";
 import os from "os";
 import path from "path";
 
-// 1. Define a class that satisfies the library's strict check
+// 1. Increased length to 32k bytes (which is 64k hex chars) to be very safe
+const SIGNATURE_LENGTH = 32768; 
+
 class ExternalSigner extends Signer {
   constructor(signatureBuffer) {
     super();
     this.signatureBuffer = signatureBuffer;
   }
-
-  // The library calls this method internally
   async sign() {
     return this.signatureBuffer;
   }
 }
-
-const SIGNATURE_LENGTH = 16384;
 
 export async function signBuffer(pdfBuffer) {
   if (process.env.NODE_ENV === "development") {
@@ -29,6 +27,7 @@ export async function signBuffer(pdfBuffer) {
 
   console.log("🚀 Starting production-grade PDF signing...");
 
+  // 1️⃣ Add placeholder
   const pdfWithPlaceholder = plainAddPlaceholder({
     pdfBuffer,
     reason: "TransferGuard Legal Seal",
@@ -42,7 +41,7 @@ export async function signBuffer(pdfBuffer) {
   fs.writeFileSync(inputPdf, pdfWithPlaceholder);
 
   try {
-    console.log("🔐 Creating PKCS#7 CMS signature via OpenSSL + PKCS#11...");
+    console.log("🔐 Creating Detached PKCS#7 CMS signature...");
 
     const opensslSign = spawnSync(
       process.env.OPENSSL_BIN || "/opt/homebrew/opt/openssl@3/bin/openssl",
@@ -66,7 +65,7 @@ export async function signBuffer(pdfBuffer) {
         "DER",
         "-md",
         "sha256",
-        "-nodetach",
+        "-detached", // <--- CRITICAL CHANGE: Use detached instead of nodetach
         "-out",
         cmsFile,
       ],
@@ -82,18 +81,15 @@ export async function signBuffer(pdfBuffer) {
     }
 
     const cmsSignature = fs.readFileSync(cmsFile);
-    console.log("✅ PKCS#7 CMS signature created");
+    console.log(`✅ Detached CMS signature created (${cmsSignature.length} bytes)`);
 
-    // 3️⃣ Inject CMS into PDF using the Class-based Signer
+    // 3️⃣ Inject CMS into PDF
     const signPdf = new SignPdf();
-    
-    // Create an instance of our custom class so 'instanceof Signer' is true
     const signerInstance = new ExternalSigner(cmsSignature);
 
-    // Call sign (it is an async method in their source code)
     const signedPdfBuffer = await signPdf.sign(pdfWithPlaceholder, signerInstance);
 
-    console.log("🎉 PDF successfully signed (PKCS#7 style via PKCS#11)");
+    console.log("🎉 PDF successfully signed!");
 
     return signedPdfBuffer;
   } finally {
