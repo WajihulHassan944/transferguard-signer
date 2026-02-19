@@ -1,14 +1,14 @@
-const { plainAddPlaceholder } = require("@signpdf/placeholder-plain");
-const { SignPdf } = require("@signpdf/signpdf");
-const { spawnSync } = require("child_process");
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-const crypto = require("crypto");
+import { plainAddPlaceholder } from "@signpdf/placeholder-plain";
+import { SignPdf } from "@signpdf/signpdf";
+import { spawnSync } from "child_process";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import crypto from "crypto";
 
 const SIGNATURE_LENGTH = 16384; // Enough for full cert chain
 
-async function signBuffer(pdfBuffer) {
+export async function signBuffer(pdfBuffer) {
   if (process.env.NODE_ENV === "development") {
     console.log("⚠️ Dev mode → skipping signing");
     return pdfBuffer;
@@ -74,7 +74,7 @@ async function signBuffer(pdfBuffer) {
 
     const rawSignature = fs.readFileSync(sigFile);
 
-    // 5️⃣ Inject the raw signature into PDF
+    // 5️⃣ Inject raw signature into PDF
     const signPdf = new SignPdf();
     const signedPdfBuffer = signPdf.sign(pdfWithPlaceholder, {
       sign: () => rawSignature,
@@ -91,5 +91,3 @@ async function signBuffer(pdfBuffer) {
     }
   }
 }
-
-module.exports = { signBuffer };
