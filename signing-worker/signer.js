@@ -43,7 +43,7 @@ export async function signBuffer(pdfBuffer) {
   try {
     console.log("🔐 Creating Detached PKCS#7 CMS signature...");
 
-    const opensslSign = spawnSync(
+const opensslSign = spawnSync(
       process.env.OPENSSL_BIN || "/opt/homebrew/opt/openssl@3/bin/openssl",
       [
         "cms",
@@ -65,7 +65,9 @@ export async function signBuffer(pdfBuffer) {
         "DER",
         "-md",
         "sha256",
-        "-detached", // <--- CRITICAL CHANGE: Use detached instead of nodetach
+        "-stream",  // Recommended for large files
+        // We REMOVE -nodetach. 
+        // In OpenSSL cms, if you don't provide -nodetach, it creates a detached signature.
         "-out",
         cmsFile,
       ],
@@ -75,7 +77,6 @@ export async function signBuffer(pdfBuffer) {
         maxBuffer: 20 * 1024 * 1024 
       }
     );
-
     if (opensslSign.status !== 0) {
       throw new Error(`OpenSSL failed: ${opensslSign.stderr?.toString()}`);
     }
