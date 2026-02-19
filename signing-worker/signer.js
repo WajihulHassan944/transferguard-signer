@@ -49,27 +49,18 @@ const opensslSign = spawnSync(
         "cms",
         "-sign",
         "-binary",
-        "-in",
-        inputPdf,
-        "-signer",
-        process.env.CERT_FILE,
-        "-certfile",
-        process.env.INTERMEDIATE_CERT,
-        "-engine",
-        "pkcs11",
-        "-keyform",
-        "engine",
-        "-inkey",
-        `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
-        "-outform",
-        "DER",
-        "-md",
-        "sha256",
-        "-stream",  // Recommended for large files
-        // We REMOVE -nodetach. 
-        // In OpenSSL cms, if you don't provide -nodetach, it creates a detached signature.
-        "-out",
-        cmsFile,
+        "-in", inputPdf,
+        "-signer", process.env.CERT_FILE,
+        "-certfile", process.env.INTERMEDIATE_CERT,
+        "-engine", "pkcs11",
+        "-keyform", "engine",
+        "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
+        "-outform", "DER",
+        "-md", "sha256",
+        "-nosmimecap",  // Do not include S/MIME capabilities
+        "-noattr",      // Do not include authenticated attributes (makes it smaller)
+        "-out", cmsFile,
+        // REMOVING -stream as it can sometimes force content inclusion
       ],
       { 
         env: { ...process.env }, 
