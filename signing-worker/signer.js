@@ -1,13 +1,14 @@
-import { plainAddPlaceholder } from "@signpdf/placeholder-plain";
-import { SignPdf } from "@signpdf/signpdf";
-import { spawnSync } from "child_process";
-import fs from "fs";
-import os from "os";
-import path from "path";
+const { plainAddPlaceholder } = require("@signpdf/placeholder-plain");
+const { SignPdf } = require("@signpdf/signpdf");
+const { spawnSync } = require("child_process");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const crypto = require("crypto");
 
 const SIGNATURE_LENGTH = 16384; // Enough for full cert chain
 
-export async function signBuffer(pdfBuffer) {
+async function signBuffer(pdfBuffer) {
   if (process.env.NODE_ENV === "development") {
     console.log("⚠️ Dev mode → skipping signing");
     return pdfBuffer;
@@ -24,78 +25,62 @@ export async function signBuffer(pdfBuffer) {
 
   console.log("✅ Placeholder added");
 
-  // 2️⃣ Prepare temp file for input only
+  // 2️⃣ Prepare temp files
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
   const inputPdf = path.join(tmpDir, "input.pdf");
+  const hashFile = path.join(tmpDir, "hash.bin");
+  const sigFile = path.join(tmpDir, "sig.bin");
 
   fs.writeFileSync(inputPdf, pdfWithPlaceholder);
 
-  const opensslEnv = {
-    ...process.env,
-    PKCS11_MODULE: process.env.PKCS11_MODULE,
-    PIN: process.env.PKCS11_PIN,
-    OPENSSL_CONF: process.env.OPENSSL_CONF,
-  };
-
   try {
-    console.log("🔐 Creating PKCS#7 CMS signature...");
+    // 3️⃣ Compute hash of PDF placeholder
+    const hash = crypto.createHash("sha256").update(pdfWithPlaceholder).digest();
+    fs.writeFileSync(hashFile, hash);
 
-    const opensslSign = spawnSync(
-      "openssl",
+    console.log("🔐 Hash of PDF placeholder computed");
+
+    // 4️⃣ Sign hash using PKCS#11 token
+    const pkcs11Sign = spawnSync(
+      "pkcs11-tool",
       [
-        "cms",
-        "-sign",
-        "-binary",
-        "-in",
-        inputPdf,
-        "-signer",
-        process.env.CERT_FILE,
-        "-certfile",
-        process.env.INTERMEDIATE_CERT,
-        "-engine",
-        "pkcs11",
-        "-keyform",
-        "engine",
-        "-inkey",
-        `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};id=${process.env.PKCS11_KEY_ID};type=private`,
-        "-outform",
-        "DER",
-        "-md",
-        "sha256",
-        "-nodetach",
+        "--module",
+        process.env.PKCS11_MODULE,
+        "-l",
+        "-p",
+        process.env.PKCS11_PIN,
+        "--sign",
+        "--id",
+        process.env.PKCS11_KEY_ID,
+        "--input-file",
+        hashFile,
+        "--output-file",
+        sigFile,
+        "--mechanism",
+        "RSA-PKCS",
       ],
-      {
-        env: opensslEnv,
-        encoding: null, // 👈 VERY IMPORTANT (returns Buffer)
-        maxBuffer: 10 * 1024 * 1024,
-      }
+      { encoding: "buffer" }
     );
 
-    if (opensslSign.status !== 0) {
+    if (pkcs11Sign.status !== 0) {
       throw new Error(
-        `OpenSSL signing failed:\n${
-          opensslSign.stderr?.toString() ||
-          opensslSign.stdout?.toString() ||
-          "Unknown error"
+        `PKCS#11 signing failed:\n${
+          pkcs11Sign.stderr?.toString() || pkcs11Sign.stdout?.toString() || "Unknown error"
         }`
       );
     }
 
-    if (!opensslSign.stdout || opensslSign.stdout.length === 0) {
-      throw new Error("OpenSSL did not return CMS signature data");
-    }
+    console.log("✅ Hash signed via PKCS#11 token");
 
-    console.log("✅ PKCS#7 CMS signature created");
+    const rawSignature = fs.readFileSync(sigFile);
 
-    const cmsSignature = opensslSign.stdout;
-
-    // 4️⃣ Inject CMS into PDF
+    // 5️⃣ Inject the raw signature into PDF
     const signPdf = new SignPdf();
     const signedPdfBuffer = signPdf.sign(pdfWithPlaceholder, {
-      sign: () => cmsSignature,
+      sign: () => rawSignature,
     });
 
-    console.log("🎉 PDF successfully signed (PKCS#7, no TSA)");
+    console.log("🎉 PDF successfully signed (PKCS#7 style via token)");
 
     return signedPdfBuffer;
   } finally {
@@ -106,3 +91,5 @@ export async function signBuffer(pdfBuffer) {
     }
   }
 }
+
+module.exports = { signBuffer };
