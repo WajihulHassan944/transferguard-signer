@@ -24,11 +24,9 @@ export async function signBuffer(pdfBuffer) {
 
   console.log("✅ Placeholder added");
 
-  // 2️⃣ Prepare temp files
+  // 2️⃣ Prepare temp file for input only
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
   const inputPdf = path.join(tmpDir, "input.pdf");
-  const cmsFile = path.join(tmpDir, "signature.p7s");
-  const finalPdf = path.join(tmpDir, "signed.pdf");
 
   fs.writeFileSync(inputPdf, pdfWithPlaceholder);
 
@@ -40,7 +38,6 @@ export async function signBuffer(pdfBuffer) {
   };
 
   try {
-    // 3️⃣ Create PKCS#7 CMS signature
     console.log("🔐 Creating PKCS#7 CMS signature...");
 
     const opensslSign = spawnSync(
@@ -63,40 +60,45 @@ export async function signBuffer(pdfBuffer) {
         `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};id=${process.env.PKCS11_KEY_ID};type=private`,
         "-outform",
         "DER",
-        "-out",
-        cmsFile,
         "-md",
         "sha256",
         "-nodetach",
       ],
-      { env: opensslEnv }
+      {
+        env: opensslEnv,
+        encoding: null, // 👈 VERY IMPORTANT (returns Buffer)
+        maxBuffer: 10 * 1024 * 1024,
+      }
     );
 
     if (opensslSign.status !== 0) {
       throw new Error(
         `OpenSSL signing failed:\n${
-          opensslSign.stderr.toString() || opensslSign.stdout.toString()
+          opensslSign.stderr?.toString() ||
+          opensslSign.stdout?.toString() ||
+          "Unknown error"
         }`
       );
     }
 
+    if (!opensslSign.stdout || opensslSign.stdout.length === 0) {
+      throw new Error("OpenSSL did not return CMS signature data");
+    }
+
     console.log("✅ PKCS#7 CMS signature created");
 
-    // 4️⃣ Inject CMS into PDF
-    const cmsSignature = fs.readFileSync(cmsFile);
+    const cmsSignature = opensslSign.stdout;
 
+    // 4️⃣ Inject CMS into PDF
     const signPdf = new SignPdf();
     const signedPdfBuffer = signPdf.sign(pdfWithPlaceholder, {
       sign: () => cmsSignature,
     });
 
-    fs.writeFileSync(finalPdf, signedPdfBuffer);
-
     console.log("🎉 PDF successfully signed (PKCS#7, no TSA)");
 
     return signedPdfBuffer;
   } finally {
-    // 5️⃣ Clean up temp files
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch (err) {
