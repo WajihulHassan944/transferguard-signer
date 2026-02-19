@@ -88,15 +88,26 @@ export async function signBuffer(pdfBuffer) {
     console.log("✅ PKCS#7 CMS signature created");
 
     // 3️⃣ Inject CMS into PDF
+    // 3️⃣ Inject CMS into PDF
     const signPdf = new SignPdf();
+    
+    // We create a "dummy" signer object that the library will accept.
+    // It must have a 'sign' method that returns the buffer we already created.
+    const mySigner = {
+      sign: () => {
+        return cmsSignature;
+      }
+    };
+
+    // Pass the dummy signer as the second argument
+    const signedPdfBuffer = signPdf.sign(pdfWithPlaceholder, mySigner);
     
     /**
      * FIX: The library expects a 'Signer' implementation.
      * Passing the signature directly as the second argument is the most 
      * reliable way to inject a pre-computed CMS block in recent versions.
      */
-    const signedPdfBuffer = signPdf.sign(pdfWithPlaceholder, cmsSignature);
-
+  
     console.log("🎉 PDF successfully signed (PKCS#7 style via PKCS#11)");
 
     return signedPdfBuffer;
