@@ -40,7 +40,8 @@ export async function signBuffer(pdfBuffer) {
     ...process.env,
     PKCS11_MODULE: process.env.PKCS11_MODULE,
     PIN: process.env.PKCS11_PIN,
-    OPENSSL_CONF: path.join(os.homedir(), "openssl-pkcs11.cnf"), // full path
+    OPENSSL_CONF: process.env.OPENSSL_CONF,
+
   };
 
   try {
