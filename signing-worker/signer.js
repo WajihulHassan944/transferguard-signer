@@ -4,7 +4,6 @@ import { spawnSync } from "child_process";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import crypto from "crypto";
 
 const SIGNATURE_LENGTH = 16384; // Enough for full cert chain
 
@@ -28,59 +27,68 @@ export async function signBuffer(pdfBuffer) {
   // 2️⃣ Prepare temp files
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
   const inputPdf = path.join(tmpDir, "input.pdf");
-  const hashFile = path.join(tmpDir, "hash.bin");
-  const sigFile = path.join(tmpDir, "sig.bin");
+  const cmsFile = path.join(tmpDir, "signature.p7s");
 
   fs.writeFileSync(inputPdf, pdfWithPlaceholder);
 
+  const opensslEnv = {
+    ...process.env,
+    PKCS11_MODULE: process.env.PKCS11_MODULE,
+    PKCS11_PIN: process.env.PKCS11_PIN,
+    OPENSSL_CONF: process.env.OPENSSL_CONF,
+  };
+
   try {
-    // 3️⃣ Compute hash of PDF placeholder
-    const hash = crypto.createHash("sha256").update(pdfWithPlaceholder).digest();
-    fs.writeFileSync(hashFile, hash);
+    console.log("🔐 Creating PKCS#7 CMS signature via OpenSSL + PKCS#11...");
 
-    console.log("🔐 Hash of PDF placeholder computed");
-
-    // 4️⃣ Sign hash using PKCS#11 token
-    const pkcs11Sign = spawnSync(
-      "pkcs11-tool",
+    const opensslSign = spawnSync(
+      "openssl",
       [
-        "--module",
-        process.env.PKCS11_MODULE,
-        "-l",
-        "-p",
-        process.env.PKCS11_PIN,
-        "--sign",
-        "--id",
-        process.env.PKCS11_KEY_ID,
-        "--input-file",
-        hashFile,
-        "--output-file",
-        sigFile,
-        "--mechanism",
-        "RSA-PKCS",
+        "cms",
+        "-sign",
+        "-binary",
+        "-in",
+        inputPdf,
+        "-signer",
+        process.env.CERT_FILE,
+        "-certfile",
+        process.env.INTERMEDIATE_CERT,
+        "-engine",
+        "pkcs11",
+        "-keyform",
+        "engine",
+        "-inkey",
+        `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};id=${process.env.PKCS11_KEY_ID};type=private;pin-value=${process.env.PKCS11_PIN}`,
+        "-outform",
+        "DER",
+        "-md",
+        "sha256",
+        "-nodetach",
+        "-out",
+        cmsFile,
       ],
-      { encoding: "buffer" }
+      { env: opensslEnv, encoding: null, maxBuffer: 20 * 1024 * 1024 }
     );
 
-    if (pkcs11Sign.status !== 0) {
+    if (opensslSign.status !== 0) {
       throw new Error(
-        `PKCS#11 signing failed:\n${
-          pkcs11Sign.stderr?.toString() || pkcs11Sign.stdout?.toString() || "Unknown error"
+        `OpenSSL CMS signing failed:\n${
+          opensslSign.stderr?.toString() || opensslSign.stdout?.toString() || "Unknown error"
         }`
       );
     }
 
-    console.log("✅ Hash signed via PKCS#11 token");
+    const cmsSignature = fs.readFileSync(cmsFile);
 
-    const rawSignature = fs.readFileSync(sigFile);
+    console.log("✅ PKCS#7 CMS signature created");
 
-    // 5️⃣ Inject raw signature into PDF
+    // 3️⃣ Inject CMS into PDF
     const signPdf = new SignPdf();
     const signedPdfBuffer = signPdf.sign(pdfWithPlaceholder, {
-      sign: () => rawSignature,
+      sign: () => cmsSignature,
     });
 
-    console.log("🎉 PDF successfully signed (PKCS#7 style via token)");
+    console.log("🎉 PDF successfully signed (PKCS#7 style via PKCS#11)");
 
     return signedPdfBuffer;
   } finally {
