@@ -41,34 +41,39 @@ export async function signBuffer(pdfBuffer) {
   try {
     console.log("🔐 Creating PKCS#7 CMS signature via OpenSSL + PKCS#11...");
 
-    const opensslSign = spawnSync(
-      "openssl",
-      [
-        "cms",
-        "-sign",
-        "-binary",
-        "-in",
-        inputPdf,
-        "-signer",
-        process.env.CERT_FILE,
-        "-certfile",
-        process.env.INTERMEDIATE_CERT,
-        "-engine",
-        "pkcs11",
-        "-keyform",
-        "engine",
-        "-inkey",
-        `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};id=${process.env.PKCS11_KEY_ID};type=private;pin-value=${process.env.PKCS11_PIN}`,
-        "-outform",
-        "DER",
-        "-md",
-        "sha256",
-        "-nodetach",
-        "-out",
-        cmsFile,
-      ],
-      { env: opensslEnv, encoding: null, maxBuffer: 20 * 1024 * 1024 }
-    );
+// Change the spawnSync call to use your environment variable path
+const opensslSign = spawnSync(
+  process.env.OPENSSL_BIN, // This uses /opt/homebrew/opt/openssl@3/bin/openssl
+  [
+    "cms",
+    "-sign",
+    "-binary",
+    "-in",
+    inputPdf,
+    "-signer",
+    process.env.CERT_FILE,
+    "-certfile",
+    process.env.INTERMEDIATE_CERT,
+    "-engine",
+    "pkcs11",
+    "-keyform",
+    "engine",
+    "-inkey",
+    `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};id=${process.env.PKCS11_KEY_ID};type=private;pin-value=${process.env.PKCS11_PIN}`,
+    "-outform",
+    "DER",
+    "-md",
+    "sha256",
+    "-nodetach",
+    "-out",
+    cmsFile,
+  ],
+  { 
+    env: opensslEnv, 
+    encoding: null, 
+    maxBuffer: 20 * 1024 * 1024 
+  }
+);
 
     if (opensslSign.status !== 0) {
       throw new Error(
