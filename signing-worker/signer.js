@@ -1,11 +1,25 @@
 import { plainAddPlaceholder } from "@signpdf/placeholder-plain";
 import { SignPdf } from "@signpdf/signpdf";
+import { Signer } from "@signpdf/utils"; // <--- Add this import
 import { spawnSync } from "child_process";
 import fs from "fs";
 import os from "os";
 import path from "path";
 
-const SIGNATURE_LENGTH = 16384; // Enough for full cert chain
+// 1. Define a class that satisfies the library's strict check
+class ExternalSigner extends Signer {
+  constructor(signatureBuffer) {
+    super();
+    this.signatureBuffer = signatureBuffer;
+  }
+
+  // The library calls this method internally
+  async sign() {
+    return this.signatureBuffer;
+  }
+}
+
+const SIGNATURE_LENGTH = 16384;
 
 export async function signBuffer(pdfBuffer) {
   if (process.env.NODE_ENV === "development") {
@@ -15,34 +29,21 @@ export async function signBuffer(pdfBuffer) {
 
   console.log("🚀 Starting production-grade PDF signing...");
 
-  // 1️⃣ Add placeholder
   const pdfWithPlaceholder = plainAddPlaceholder({
     pdfBuffer,
     reason: "TransferGuard Legal Seal",
     signatureLength: SIGNATURE_LENGTH,
   });
 
-  console.log("✅ Placeholder added");
-
-  // 2️⃣ Prepare temp files
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
   const inputPdf = path.join(tmpDir, "input.pdf");
   const cmsFile = path.join(tmpDir, "signature.p7s");
 
   fs.writeFileSync(inputPdf, pdfWithPlaceholder);
 
-  const opensslEnv = {
-    ...process.env,
-    PKCS11_MODULE: process.env.PKCS11_MODULE,
-    PKCS11_PIN: process.env.PKCS11_PIN,
-    OPENSSL_CONF: process.env.OPENSSL_CONF,
-  };
-
   try {
     console.log("🔐 Creating PKCS#7 CMS signature via OpenSSL + PKCS#11...");
 
-    // Using absolute path to Homebrew OpenSSL 3 to avoid macOS LibreSSL conflict
-    // Using token-only URI to avoid the messy ID encoding issue
     const opensslSign = spawnSync(
       process.env.OPENSSL_BIN || "/opt/homebrew/opt/openssl@3/bin/openssl",
       [
@@ -70,40 +71,36 @@ export async function signBuffer(pdfBuffer) {
         cmsFile,
       ],
       { 
-        env: opensslEnv, 
+        env: { ...process.env }, 
         encoding: null, 
         maxBuffer: 20 * 1024 * 1024 
       }
     );
 
     if (opensslSign.status !== 0) {
-      throw new Error(
-        `OpenSSL CMS signing failed:\n${
-          opensslSign.stderr?.toString() || opensslSign.stdout?.toString() || "Unknown error"
-        }`
-      );
+      throw new Error(`OpenSSL failed: ${opensslSign.stderr?.toString()}`);
     }
 
-   const cmsSignature = fs.readFileSync(cmsFile);
+    const cmsSignature = fs.readFileSync(cmsFile);
     console.log("✅ PKCS#7 CMS signature created");
 
-    // 3️⃣ Inject CMS into PDF
-    // We bypass the 'Signer' validation by using the internal logic 
-    // to just place the signature into the placeholder.
-    const signedPdfBuffer = new SignPdf().sign(pdfWithPlaceholder, {
-        sign: () => Promise.resolve(cmsSignature)
-    });
+    // 3️⃣ Inject CMS into PDF using the Class-based Signer
+    const signPdf = new SignPdf();
     
+    // Create an instance of our custom class so 'instanceof Signer' is true
+    const signerInstance = new ExternalSigner(cmsSignature);
+
+    // Call sign (it is an async method in their source code)
+    const signedPdfBuffer = await signPdf.sign(pdfWithPlaceholder, signerInstance);
+
     console.log("🎉 PDF successfully signed (PKCS#7 style via PKCS#11)");
 
     return signedPdfBuffer;
   } finally {
     try {
-      if (fs.existsSync(tmpDir)) {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch (err) {
-      console.warn("⚠️ Failed to remove temp files:", err);
+      console.warn("⚠️ Temp cleanup failed:", err);
     }
   }
 }
