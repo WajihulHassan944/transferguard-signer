@@ -42,8 +42,9 @@ export async function signBuffer(pdfBuffer) {
     console.log("🔐 Creating PKCS#7 CMS signature via OpenSSL + PKCS#11...");
 
 // Change the spawnSync call to use your environment variable path
+// Remove the ID part entirely from the inkey string
 const opensslSign = spawnSync(
-  process.env.OPENSSL_BIN, // This uses /opt/homebrew/opt/openssl@3/bin/openssl
+  process.env.OPENSSL_BIN,
   [
     "cms",
     "-sign",
@@ -59,7 +60,7 @@ const opensslSign = spawnSync(
     "-keyform",
     "engine",
     "-inkey",
-    `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};id=${process.env.PKCS11_KEY_ID};type=private;pin-value=${process.env.PKCS11_PIN}`,
+    `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
     "-outform",
     "DER",
     "-md",
