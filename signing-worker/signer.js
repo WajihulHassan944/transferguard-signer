@@ -1,7 +1,26 @@
 import { plainAddPlaceholder } from "@signpdf/placeholder-plain";
 import { SignPdf, Signer } from "@signpdf/signpdf";
-
 const pkcs11js = (await import("pkcs11js")).default;
+import nodeForge from "node-forge";  // or use pkijs if preferred
+import fetch from "node-fetch";  // For fetching timestamp
+import crypto from "crypto";
+
+const TSA_URL = "http://timestamp.sectigo.com"; // Sectigo's public timestamp server
+
+// Function to apply TSA (Timestamping)
+export async function applyTimestamp(buffer) {
+  const hash = crypto.createHash("sha256").update(buffer).digest();
+
+  const res = await fetch(TSA_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/timestamp-query" },
+    body: hash
+  });
+
+  const tsaToken = Buffer.from(await res.arrayBuffer());
+
+  return Buffer.concat([buffer, tsaToken]); // Concatenate the TSA token to the buffer
+}
 
 export async function signBuffer(pdfBuffer) {
   if (process.env.NODE_ENV === "development") {
@@ -15,7 +34,7 @@ export async function signBuffer(pdfBuffer) {
   const pdfWithPlaceholder = plainAddPlaceholder({
     pdfBuffer,
     reason: "TransferGuard Legal Seal",
-    signatureLength: 256,
+    signatureLength: 12288,  // Increased signatureLength for full certificate chain
   });
 
   console.log("✅ Placeholder added");
@@ -59,45 +78,41 @@ export async function signBuffer(pdfBuffer) {
 
     console.log("🗝 Using private key handle:", privateKey);
 
-    // OPTIONAL: Get key attributes
-    const attrs = pkcs11.C_GetAttributeValue(session, privateKey, [
-      { type: pkcs11js.CKA_ID },
-      { type: pkcs11js.CKA_LABEL },
-      { type: pkcs11js.CKA_MODULUS },
-    ]);
-
-    console.log("📌 Key ID:", attrs[0]?.value?.toString("hex"));
-    console.log("📌 Key Label:", attrs[1]?.value?.toString());
-    console.log(
-      "📌 Key Size:",
-      attrs[2]?.value ? attrs[2].value.length * 8 + " bits" : "unknown"
-    );
-
     // 4️⃣ Signer class
-  class PKCS11Signer extends Signer {
-  async sign(data) {
-    console.log("✍️ Signing data...");
-    console.log("📦 Data length:", data.length);
+    class PKCS11Signer extends Signer {
+      async sign(data) {
+        console.log("✍️ Signing data...");
+        console.log("📦 Data length:", data.length);
 
-    pkcs11.C_SignInit(
-      session,
-      { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS },
-      privateKey
-    );
+        pkcs11.C_SignInit(
+          session,
+          { mechanism: pkcs11js.CKM_SHA256_RSA_PKCS },
+          privateKey
+        );
 
-    // DO NOT allocate buffer
-  const sigBuffer = Buffer.alloc(256); // 2048-bit key = 256 bytes
-const sigLen = pkcs11.C_Sign(session, data, sigBuffer);
+        const sigBuffer = Buffer.alloc(12288);  // Adjusted to 8192 or 12288 for full certificate chain
+        const sigLen = pkcs11.C_Sign(session, data, sigBuffer);
 
-console.log("📏 Signature length:", sigLen, "bytes");
+        console.log("📏 Signature length:", sigLen, "bytes");
 
-return sigBuffer.slice(0, sigLen);
-
-  }
-}
-
+        return sigBuffer.slice(0, sigLen);
+      }
+    }
 
     const signerInstance = new PKCS11Signer();
+
+    // 5️⃣ PKCS#7 Wrapper for the raw signature (DER-encoded)
+    const createPKCS7Container = (rawSignature, certChain) => {
+      const p7 = new nodeForge.pki.createSignedData();
+      p7.addCertificate(certChain); // Add all certificates in the chain
+      p7.addSigner({
+        key: privateKey,
+        certificate: certChain[0],  // Use the first certificate as the signer's cert
+        digestAlgorithm: nodeForge.pki.oids.sha256,
+      });
+      p7.sign({ detached: true });
+      return p7.toDer();
+    };
 
     const signPdf = new SignPdf();
     const signedPdf = await signPdf.sign(
@@ -105,16 +120,19 @@ return sigBuffer.slice(0, sigLen);
       signerInstance
     );
 
-    console.log("🎉 PDF successfully signed");
+    // 6️⃣ Apply TSA timestamping to the signed PDF
+    const timestampedPdf = await applyTimestamp(signedPdf); // Add TSA
 
-    // 5️⃣ Cleanup
+    console.log("🎉 PDF successfully signed and timestamped");
+
+    // 7️⃣ Cleanup
     pkcs11.C_Logout(session);
     pkcs11.C_CloseSession(session);
     pkcs11.C_Finalize();
 
     console.log("🔚 PKCS#11 session closed");
 
-    return signedPdf;
+    return timestampedPdf; // Return the final PDF with timestamp
   } catch (err) {
     console.error("❌ Signing error:", err);
 
