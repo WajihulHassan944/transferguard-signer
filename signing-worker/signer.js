@@ -6,7 +6,7 @@ import os from "os";
 import path from "path";
 
 const TSA_URL = "http://timestamp.sectigo.com";
-const SIGNATURE_LENGTH = 16384; // increase to accommodate cert chain + TSA token
+const SIGNATURE_LENGTH = 16384; // Enough for full cert chain + TSA token
 
 export async function signBuffer(pdfBuffer) {
   if (process.env.NODE_ENV === "development") {
@@ -25,20 +25,27 @@ export async function signBuffer(pdfBuffer) {
 
   console.log("✅ Placeholder added");
 
-  // 2️⃣ Temp files
+  // 2️⃣ Prepare temp files
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
   const inputPdf = path.join(tmpDir, "input.pdf");
   const cmsFile = path.join(tmpDir, "signature.p7s");
   const tsQuery = path.join(tmpDir, "ts_query.tsq");
   const tsReply = path.join(tmpDir, "ts_reply.tsr");
+  const timestampedCms = path.join(tmpDir, "timestamped.p7s");
   const finalPdf = path.join(tmpDir, "signed.pdf");
 
   fs.writeFileSync(inputPdf, pdfWithPlaceholder);
 
-  try {
-    // 3️⃣ Generate PKCS#7 signature using PKCS#11
-    console.log("🔐 Creating PKCS#7 CMS signature...");
+  const opensslEnv = {
+    ...process.env,
+    PKCS11_MODULE: process.env.PKCS11_MODULE,
+    PIN: process.env.PKCS11_PIN,
+    OPENSSL_CONF: path.join(os.homedir(), "openssl-pkcs11.cnf"), // full path
+  };
 
+  try {
+    // 3️⃣ Create PKCS#7 signature
+    console.log("🔐 Creating PKCS#7 CMS signature...");
     const opensslSign = spawnSync("openssl", [
       "cms",
       "-sign",
@@ -53,23 +60,16 @@ export async function signBuffer(pdfBuffer) {
       "-out", cmsFile,
       "-md", "sha256",
       "-nodetach",
-    ], {
-      env: {
-        ...process.env,
-        PKCS11_MODULE: process.env.PKCS11_MODULE,
-        PIN: process.env.PKCS11_PIN,
-      }
-    });
+    ], { env: opensslEnv });
 
     if (opensslSign.status !== 0) {
       throw new Error(`OpenSSL signing failed:\n${opensslSign.stderr.toString() || opensslSign.stdout.toString()}`);
     }
-
     console.log("✅ PKCS#7 CMS signature created");
 
     // 4️⃣ Generate RFC3161 timestamp request
     console.log("🕒 Generating timestamp request...");
-    spawnSync("openssl", [
+    const tsQueryGen = spawnSync("openssl", [
       "ts",
       "-query",
       "-data", cmsFile,
@@ -78,7 +78,11 @@ export async function signBuffer(pdfBuffer) {
       "-out", tsQuery
     ]);
 
-    // 5️⃣ Send request to TSA
+    if (tsQueryGen.status !== 0) {
+      throw new Error(`Timestamp query generation failed:\n${tsQueryGen.stderr.toString()}`);
+    }
+
+    // 5️⃣ Send query to TSA
     const curlTSA = spawnSync("curl", [
       "-sS",
       "-H", "Content-Type: application/timestamp-query",
@@ -90,11 +94,10 @@ export async function signBuffer(pdfBuffer) {
     if (curlTSA.status !== 0) {
       throw new Error("TSA request failed");
     }
-
     console.log("✅ TSA reply received");
 
-    // 6️⃣ Embed TSA token into CMS (RFC3161)
-    const timestampedCms = path.join(tmpDir, "timestamped.p7s");
+    // 6️⃣ Embed TSA token into CMS
+    console.log("🕒 Embedding TSA token into CMS...");
     const tsEmbed = spawnSync("openssl", [
       "cms",
       "-in", cmsFile,
@@ -106,15 +109,13 @@ export async function signBuffer(pdfBuffer) {
       "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};id=${process.env.PKCS11_KEY_ID};type=private`,
       "-outform", "DER",
       "-binary",
-      "-attime", new Date().toISOString(), // optional
-      "-tsacert", process.env.ROOT_CERT,
-      "-tsareq", tsReply
-    ]);
+      "-tsareq", tsReply,
+      "-tsacert", process.env.ROOT_CERT
+    ], { env: opensslEnv });
 
     if (tsEmbed.status !== 0) {
       throw new Error(`Embedding TSA token failed:\n${tsEmbed.stderr.toString() || tsEmbed.stdout.toString()}`);
     }
-
     console.log("✅ Timestamp embedded");
 
     // 7️⃣ Inject CMS into PDF
@@ -125,12 +126,11 @@ export async function signBuffer(pdfBuffer) {
     });
 
     fs.writeFileSync(finalPdf, signedPdfBuffer);
-
     console.log("🎉 PDF fully signed with PKCS#7 + TSA");
 
     return signedPdfBuffer;
   } finally {
-    // Clean up temp files
+    // 8️⃣ Clean up temp files
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch (err) {
