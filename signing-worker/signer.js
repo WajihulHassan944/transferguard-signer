@@ -5,8 +5,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-const TSA_URL = "http://timestamp.sectigo.com";
-const SIGNATURE_LENGTH = 16384; // Enough for full cert chain + TSA token
+const SIGNATURE_LENGTH = 16384; // Enough for full cert chain
 
 export async function signBuffer(pdfBuffer) {
   if (process.env.NODE_ENV === "development") {
@@ -29,9 +28,6 @@ export async function signBuffer(pdfBuffer) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
   const inputPdf = path.join(tmpDir, "input.pdf");
   const cmsFile = path.join(tmpDir, "signature.p7s");
-  const tsQuery = path.join(tmpDir, "ts_query.tsq");
-  const tsReply = path.join(tmpDir, "ts_reply.tsr");
-  const timestampedCms = path.join(tmpDir, "timestamped.p7s");
   const finalPdf = path.join(tmpDir, "signed.pdf");
 
   fs.writeFileSync(inputPdf, pdfWithPlaceholder);
@@ -41,97 +37,66 @@ export async function signBuffer(pdfBuffer) {
     PKCS11_MODULE: process.env.PKCS11_MODULE,
     PIN: process.env.PKCS11_PIN,
     OPENSSL_CONF: process.env.OPENSSL_CONF,
-
   };
 
   try {
-    // 3️⃣ Create PKCS#7 signature
+    // 3️⃣ Create PKCS#7 CMS signature
     console.log("🔐 Creating PKCS#7 CMS signature...");
-    const opensslSign = spawnSync("openssl", [
-      "cms",
-      "-sign",
-      "-binary",
-      "-in", inputPdf,
-      "-signer", process.env.CERT_FILE,
-      "-certfile", process.env.INTERMEDIATE_CERT,
-      "-engine", "pkcs11",
-      "-keyform", "engine",
-      "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};id=${process.env.PKCS11_KEY_ID};type=private`,
-      "-outform", "DER",
-      "-out", cmsFile,
-      "-md", "sha256",
-      "-nodetach",
-    ], { env: opensslEnv });
+
+    const opensslSign = spawnSync(
+      "openssl",
+      [
+        "cms",
+        "-sign",
+        "-binary",
+        "-in",
+        inputPdf,
+        "-signer",
+        process.env.CERT_FILE,
+        "-certfile",
+        process.env.INTERMEDIATE_CERT,
+        "-engine",
+        "pkcs11",
+        "-keyform",
+        "engine",
+        "-inkey",
+        `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};id=${process.env.PKCS11_KEY_ID};type=private`,
+        "-outform",
+        "DER",
+        "-out",
+        cmsFile,
+        "-md",
+        "sha256",
+        "-nodetach",
+      ],
+      { env: opensslEnv }
+    );
 
     if (opensslSign.status !== 0) {
-      throw new Error(`OpenSSL signing failed:\n${opensslSign.stderr.toString() || opensslSign.stdout.toString()}`);
+      throw new Error(
+        `OpenSSL signing failed:\n${
+          opensslSign.stderr.toString() || opensslSign.stdout.toString()
+        }`
+      );
     }
+
     console.log("✅ PKCS#7 CMS signature created");
 
-    // 4️⃣ Generate RFC3161 timestamp request
-    console.log("🕒 Generating timestamp request...");
-    const tsQueryGen = spawnSync("openssl", [
-      "ts",
-      "-query",
-      "-data", cmsFile,
-      "-no_nonce",
-      "-sha256",
-      "-out", tsQuery
-    ]);
+    // 4️⃣ Inject CMS into PDF
+    const cmsSignature = fs.readFileSync(cmsFile);
 
-    if (tsQueryGen.status !== 0) {
-      throw new Error(`Timestamp query generation failed:\n${tsQueryGen.stderr.toString()}`);
-    }
-
-    // 5️⃣ Send query to TSA
-    const curlTSA = spawnSync("curl", [
-      "-sS",
-      "-H", "Content-Type: application/timestamp-query",
-      "--data-binary", `@${tsQuery}`,
-      TSA_URL,
-      "-o", tsReply
-    ]);
-
-    if (curlTSA.status !== 0) {
-      throw new Error("TSA request failed");
-    }
-    console.log("✅ TSA reply received");
-
-    // 6️⃣ Embed TSA token into CMS
-    console.log("🕒 Embedding TSA token into CMS...");
-    const tsEmbed = spawnSync("openssl", [
-      "cms",
-      "-in", cmsFile,
-      "-out", timestampedCms,
-      "-signer", process.env.CERT_FILE,
-      "-certfile", process.env.INTERMEDIATE_CERT,
-      "-engine", "pkcs11",
-      "-keyform", "engine",
-      "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};id=${process.env.PKCS11_KEY_ID};type=private`,
-      "-outform", "DER",
-      "-binary",
-      "-tsareq", tsReply,
-      "-tsacert", process.env.ROOT_CERT
-    ], { env: opensslEnv });
-
-    if (tsEmbed.status !== 0) {
-      throw new Error(`Embedding TSA token failed:\n${tsEmbed.stderr.toString() || tsEmbed.stdout.toString()}`);
-    }
-    console.log("✅ Timestamp embedded");
-
-    // 7️⃣ Inject CMS into PDF
-    const cmsSignature = fs.readFileSync(timestampedCms);
     const signPdf = new SignPdf();
     const signedPdfBuffer = signPdf.sign(pdfWithPlaceholder, {
-      sign: () => cmsSignature
+      sign: () => cmsSignature,
     });
 
     fs.writeFileSync(finalPdf, signedPdfBuffer);
-    console.log("🎉 PDF fully signed with PKCS#7 + TSA");
+
+    console.log("🎉 PDF successfully signed (PKCS#7, no TSA)");
 
     return signedPdfBuffer;
   } finally {
-    // 8️⃣ Clean up temp files
+    // 5️⃣ Clean up temp files
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch (err) {
