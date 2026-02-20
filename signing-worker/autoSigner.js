@@ -36,11 +36,11 @@ export function startAutoSigner() {
     console.log("🔁 Checking for pending transfers...");
 
     try {
-     const result = await db.execute({
+const result = await db.execute({
   sql: `
     SELECT *
     FROM transfers
-    WHERE status = 'downloaded'
+    WHERE status IN ('downloaded', 'delivered')
     ORDER BY delivered_at ASC
     LIMIT 5
   `,
