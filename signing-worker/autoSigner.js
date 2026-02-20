@@ -36,9 +36,15 @@ export function startAutoSigner() {
     console.log("🔁 Checking for pending transfers...");
 
     try {
-      const result = await db.execute(
-      `SELECT * FROM transfers WHERE status != 'signed' LIMIT 5`
-);
+     const result = await db.execute({
+  sql: `
+    SELECT *
+    FROM transfers
+    WHERE status = 'downloaded'
+    ORDER BY delivered_at ASC
+    LIMIT 5
+  `,
+});
 
       const transfers = result.rows;
 
