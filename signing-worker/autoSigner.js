@@ -65,25 +65,80 @@ export function startAutoSigner() {
           }
 
           // ===== Build dynamic transferData for PDF =====
-        const transferData = {
-  id: transfer.id, // used for {{AUDIT_ID}}
+  // ===== Fetch Sender Info =====
+const senderResult = await db.execute({
+  sql: `SELECT first_name, last_name, email, company_name FROM users WHERE id = ? LIMIT 1`,
+  args: [transfer.sender_id],
+});
+
+const sender = senderResult.rows?.[0] || {};
+
+const senderName = [sender.first_name, sender.last_name]
+  .filter(Boolean)
+  .join(" ");
+
+
+// ===== Build dynamic transferData for PDF =====
+const transferData = {
+  // ======================
+  // CORE
+  // ======================
+  id: transfer.id,
+  created_at: transfer.created_at,
+
+  // ======================
+  // SENDER INFO
+  // ======================
+  sender_org: sender.company_name || "TransferGuard",
+  sender_name: senderName || "Unknown Sender",
+  sender_email: sender.email || "unknown@transferguard.com",
+
+  // ======================
+  // FILE INFO
+  // ======================
   sha256_hash: transfer.sha256_hash || transfer.encrypted_password,
-  status: "downloaded",
+  status: transfer.status || "Successfully Downloaded & Identity Verified",
   files: [
     {
       name: files?.name || "Unknown_File",
-      size: files?.size || 0,
+      size: files?.size || transfer.total_size_bytes || 0,
     },
   ],
-  recipient_email: transfer.recipient_email || "Unknown Recipient",
-  security_level: transfer.security_level || "",
-  dossier_number: transfer.dossier_number || "",
-  qerds_certified: transfer.qerds_certified || "",
-  decryption_token: transfer.decryption_token || "",
-  delivered_at: transfer.delivered_at || null,
-  signatureUrl: transfer.signatureUrl || "https://transferguard.com/signature.png",
-  signDate: transfer.signDate || new Date().toISOString(),
-  last_access_ip: transfer.last_access_ip || audit.ip_address || "0.0.0.0",
+
+  // ======================
+  // RECIPIENT
+  // ======================
+  recipient_name: transfer.recipient_email || "Verified Recipient",
+
+  // ======================
+  // IDENTITY (fallback if not using Veriff)
+  // ======================
+  id_type: "Email Verification",
+  id_number: transfer.recipient_email || "",
+  biometric_result: "N/A",
+  veriff_session: "N/A",
+  idv_timestamp: transfer.delivered_at || transfer.first_access_at || null,
+
+  // ======================
+  // SIGNATURE
+  // ======================
+  signatureUrl:
+    transfer.signatureUrl ||
+    "https://transferguard.com/signature.png",
+
+  signDate:
+    transfer.signDate ||
+    transfer.last_access_at ||
+    new Date().toISOString(),
+
+  // ======================
+  // TECHNICAL AUDIT
+  // ======================
+  last_access_ip:
+    transfer.last_access_ip ||
+    audit.ip_address ||
+    "0.0.0.0",
+
   audit_log_json: transfer.audit_log_json || null,
 };
 

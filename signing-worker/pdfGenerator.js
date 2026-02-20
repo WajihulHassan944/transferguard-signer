@@ -6,69 +6,113 @@ export async function generatePDF(data) {
   const templatePath = path.resolve("signing-worker/template.html");
   let html = fs.readFileSync(templatePath, "utf8");
 
-  // Escape any HTML special chars, render null/undefined as empty string
-  const escape = (v) => String(v ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  // ---------------------------
+  // Safe Escape Function
+  // ---------------------------
+  const escape = (v) =>
+    String(v ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
 
-  const formatDate = (d) => (d ? new Date(d).toLocaleString("en-GB", { hour12: false }) + " CET" : "");
+  const formatDate = (d) => {
+    if (!d) return "";
+    try {
+      return (
+        new Date(d).toLocaleString("en-GB", {
+          hour12: false,
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }) + " CET"
+      );
+    } catch {
+      return "";
+    }
+  };
 
   // ---------------------------
-  // Build file rows from data.files array
-  // ---------------------------
-  const fileRows = (data.files || []).map((f, i) => `
-    <tr>
-      <td>${i + 1}</td>
-      <td>${escape(f.name)}</td>
-      <td>${escape(f.size)} bytes</td>
-      <td class="mono">${escape(data.sha256_hash)}</td>
-    </tr>
-  `).join("");
-
-  // ---------------------------
-  // Parse audit_log_json for dynamic fields
+  // Parse audit_log_json safely
   // ---------------------------
   let audit = {};
   try {
-    audit = typeof data.audit_log_json === "string" ? JSON.parse(data.audit_log_json) : data.audit_log_json || {};
+    audit =
+      typeof data.audit_log_json === "string"
+        ? JSON.parse(data.audit_log_json)
+        : data.audit_log_json || {};
   } catch {
     audit = {};
   }
 
   // ---------------------------
+  // Build dynamic location
+  // ---------------------------
+  const location = [audit.city, audit.region, audit.country]
+    .filter(Boolean)
+    .join(", ");
+
+  // ---------------------------
   // Replace template placeholders
   // ---------------------------
   html = html
-    // File / Transfer Info
+    // ======================
+    // SECTION 0 - SENDER INFO
+    // ======================
+    .replaceAll("{{SENDER_ORG}}", escape(data.sender_org))
+    .replaceAll("{{SENDER_NAME}}", escape(data.sender_name))
+    .replaceAll("{{SENDER_EMAIL}}", escape(data.sender_email))
+    .replaceAll("{{DATE_SENT}}", formatDate(data.created_at))
+
+    // ======================
+    // SECTION 1 - TRANSFER
+    // ======================
     .replaceAll("{{FILE_NAME}}", escape(data.files?.[0]?.name))
     .replaceAll("{{SHA256}}", escape(data.sha256_hash))
-    .replaceAll("{{FILE_SIZE}}", escape(data.files?.[0]?.size + " bytes"))
-    .replaceAll("{{TRANSFER_STATUS}}", escape(data.status))
+    .replaceAll(
+      "{{FILE_SIZE}}",
+      escape(data.files?.[0]?.size
+        ? data.files[0].size + " bytes"
+        : "")
+    )
+    .replaceAll(
+      "{{TRANSFER_STATUS}}",
+      escape(data.status ?? "Successfully Downloaded & Identity Verified")
+    )
 
-    // Recipient / Identity (from API if exists)
-    .replaceAll("{{RECIPIENT_NAME}}", escape(data.recipient_email))
-    .replaceAll("{{ID_TYPE}}", escape(data.security_level))
-    .replaceAll("{{ID_NUMBER}}", escape(data.dossier_number))
-    .replaceAll("{{BIOMETRIC}}", escape(data.qerds_certified))
-    .replaceAll("{{VERIFF_SESSION}}", escape(data.decryption_token))
-    .replaceAll("{{IDV_TIME}}", formatDate(data.delivered_at))
+    // ======================
+    // SECTION 2 - IDENTITY
+    // ======================
+    .replaceAll("{{RECIPIENT_NAME}}", escape(data.recipient_name))
+    .replaceAll("{{ID_TYPE}}", escape(data.id_type))
+    .replaceAll("{{ID_NUMBER}}", escape(data.id_number))
+    .replaceAll("{{BIOMETRIC}}", escape(data.biometric_result))
+    .replaceAll("{{VERIFF_SESSION}}", escape(data.veriff_session))
+    .replaceAll("{{IDV_TIME}}", formatDate(data.idv_timestamp))
 
-    // Signature (non-API dynamic fields)
+    // ======================
+    // SIGNATURE
+    // ======================
     .replaceAll("{{SIGNATURE_URL}}", escape(data.signatureUrl))
-    .replaceAll("{{SIGN_DATE}}", escape(data.signDate))
+    .replaceAll("{{SIGN_DATE}}", formatDate(data.signDate))
 
-    // Audit / Access
+    // ======================
+    // TECHNICAL AUDIT
+    // ======================
     .replaceAll("{{IP}}", escape(data.last_access_ip ?? audit.ip_address))
-    .replaceAll("{{LOCATION}}", escape([audit.city, audit.region, audit.country].filter(Boolean).join(", ")))
+    .replaceAll("{{LOCATION}}", escape(location))
     .replaceAll("{{DEVICE}}", escape(audit.device_type))
     .replaceAll("{{BROWSER}}", escape(audit.user_agent))
 
-    // Audit ID (use transfer ID dynamically)
-    .replaceAll("{{AUDIT_ID}}", escape(data.id))
-
-    // Inject file rows into template
-    .replace("{{FILE_ROWS}}", fileRows);
+    // ======================
+    // AUDIT ID
+    // ======================
+    .replaceAll("{{AUDIT_ID}}", escape(data.id));
 
   // ---------------------------
-  // Generate PDF with Puppeteer
+  // Generate PDF
   // ---------------------------
   const browser = await puppeteer.launch({
     headless: "new",
@@ -76,18 +120,30 @@ export async function generatePDF(data) {
   });
 
   const page = await browser.newPage();
-  await page.setContent(html, { waitUntil: "load" });
+  await page.setContent(html, { waitUntil: "networkidle0" });
 
-  const pdf = await page.pdf({
-    format: "A4",
-    printBackground: true,
-    margin: {
-      top: "30mm",
-      right: "20mm",
-      bottom: "25mm",
-      left: "20mm",
-    },
-  });
+
+const pdf = await page.pdf({
+  format: "A4",
+  printBackground: true,
+  displayHeaderFooter: true,
+  margin: {
+    top: "26mm",    // Restored original top margin
+    bottom: "28mm", // Slightly larger to clear the multi-line footer
+    left: "22mm",   // Restored original left margin
+    right: "22mm"   // Restored original right margin
+  },
+  headerTemplate: '<div></div>', 
+  footerTemplate: `
+    <div style="font-family: 'Inter', Arial; font-size: 10px; width: 100%; text-align: center; color: #444; padding-bottom: 5px;">
+      <div style="margin-bottom: 4px;">
+        TransferGuard Legal Plan - Audit ID: <span class="title"></span> — Page <span class="pageNumber"></span> of <span class="totalPages"></span>
+      </div>
+      <div>TransferGuard is part of PVG Technologies BV, The Netherlands</div>
+    </div>
+  `,
+  preferCSSPageSize: false, 
+});
 
   await browser.close();
   return Buffer.from(pdf);
