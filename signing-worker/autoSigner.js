@@ -1,7 +1,6 @@
 import cron from "node-cron";
 import { generatePDF } from "./pdfGenerator.js";
 import { signBuffer } from "./signer.js";
-import { applyTimestamp } from "./tsa.js";
 
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NodeHttpHandler } from "@aws-sdk/node-http-handler";
@@ -154,8 +153,6 @@ const transferData = {
           // 2️⃣ HSM Sign
           const signedBuffer = await signBuffer(pdfBuffer);
 
-          // 3️⃣ TSA Timestamp
-          const finalBuffer = await applyTimestamp(signedBuffer);
 
           // 4️⃣ Upload to OVH
           const key = `signed-audit/${transfer.id}.pdf`;
@@ -164,7 +161,7 @@ const transferData = {
             new PutObjectCommand({
               Bucket: BUCKET,
               Key: key,
-              Body: finalBuffer,
+             Body: signedBuffer,
               ContentType: "application/pdf",
             })
           );
