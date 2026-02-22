@@ -128,13 +128,14 @@ class ExternalSigner extends Signer {
       values: [tsrInfo.timeStampToken.toSchema()]
     }));
 
-    // REFIXED: Wrap SignedData back into ContentInfo correctly
+    // Wrap SignedData back into ContentInfo
     const finalContentInfo = new pkijs.ContentInfo({
       contentType: "1.2.840.113549.1.7.2", // id-signedData
       content: signedData.toSchema()
     });
 
-    return finalContentInfo.toBER(false);
+    // FIXED: Correct conversion to BER buffer
+    return finalContentInfo.toSchema().toBER(false);
   }
 }
 
