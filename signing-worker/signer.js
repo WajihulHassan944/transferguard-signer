@@ -26,10 +26,12 @@ class ExternalSigner extends Signer {
       const openssl = process.env.OPENSSL_BIN || "/opt/homebrew/opt/openssl@3/bin/openssl";
 
       // 1️⃣ Create CMS signature
-      // We pass environment variables explicitly so the PKCS11 engine knows where to look
       console.log("🔐 Generating CMS signature via Hardware Token...");
+      
       const signArgs = [
-        "cms", "-sign", "-binary",
+        "cms", 
+        "-sign", 
+        "-binary",
         "-in", dataPath,
         "-signer", process.env.CERT_FILE,
         "-certfile", process.env.INTERMEDIATE_CERT,
@@ -37,7 +39,7 @@ class ExternalSigner extends Signer {
         "-keyform", "engine",
         "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
         "-outform", "DER",
-        "-sha256",
+        "-md", "sha256", // Changed from -sha256 to -md sha256
         "-out", cmsPath,
       ];
 
@@ -46,15 +48,18 @@ class ExternalSigner extends Signer {
         env: {
           ...process.env,
           OPENSSL_CONF: process.env.OPENSSL_CONF,
-          // This is critical: The engine needs to know which module to use for the token
           PKCS11_MODULE_PATH: process.env.PKCS11_MODULE 
         },
       });
 
+      // Capture output for debugging
+      const stderr = sign.stderr?.toString() || "";
+      const stdout = sign.stdout?.toString() || "";
+
       if (sign.status !== 0 || !fs.existsSync(cmsPath)) {
         console.error("❌ OpenSSL CMS Error Details:");
-        console.error(sign.stderr?.toString());
-        throw new Error(`OpenSSL failed to create CMS: ${sign.stderr?.toString()}`);
+        console.error(stderr);
+        throw new Error(`OpenSSL failed to create CMS: ${stderr}`);
       }
 
       // 2️⃣ Create RFC3161 Timestamp Query
