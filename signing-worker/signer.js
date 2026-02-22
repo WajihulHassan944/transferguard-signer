@@ -12,48 +12,76 @@ import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 
 class ExternalSigner extends Signer {
-  async sign(bufferToSign) {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
-    const dataPath = path.join(tmpDir, "data.bin");
-    const cmsPath = path.join(tmpDir, "sig.der");
-    const tsQueryPath = path.join(tmpDir, "tsq.der");
-    const tsRespPath = path.join(tmpDir, "tsr.der");
+ // ... inside ExternalSigner class ...
 
-    fs.writeFileSync(dataPath, bufferToSign);
+async sign(bufferToSign) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
+  const dataPath = path.join(tmpDir, "data.bin");
+  const cmsPath = path.join(tmpDir, "sig.der");
+  const tsQueryPath = path.join(tmpDir, "tsq.der");
+  const tsRespPath = path.join(tmpDir, "tsr.der");
 
-    try {
-      // 1️⃣ Create Initial CMS signature
-      const sign = spawnSync("openssl", [
-        "cms", "-sign", "-binary",
-        "-in", dataPath,
-        "-signer", process.env.CERT_FILE,
-        "-certfile", process.env.INTERMEDIATE_CERT,
-        "-engine", "pkcs11", "-keyform", "engine",
-        "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
-        "-outform", "DER", "-md", "sha256",
-        "-out", cmsPath,
-      ]);
+  fs.writeFileSync(dataPath, bufferToSign);
 
-      if (sign.status !== 0) throw new Error(sign.stderr?.toString());
+  try {
+    // 1️⃣ Create Initial CMS signature
+    // Added -sha256 explicitly as a command flag
+    const sign = spawnSync("openssl", [
+      "cms", "-sign", "-binary",
+      "-in", dataPath,
+      "-signer", process.env.CERT_FILE,
+      "-certfile", process.env.INTERMEDIATE_CERT,
+      "-engine", "pkcs11", "-keyform", "engine",
+      "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
+      "-outform", "DER", 
+      "-sha256", // Use this instead of -md sha256 for better compatibility
+      "-out", cmsPath,
+    ]);
 
-      // 2️⃣ Create and Fetch Timestamp (Sectigo)
-      spawnSync("openssl", ["ts", "-query", "-data", cmsPath, "-sha256", "-cert", "-out", tsQueryPath]);
-      
-      spawnSync("curl", ["-s", "-H", "Content-Type: application/timestamp-query", "--data-binary", `@${tsQueryPath}`, "http://timestamp.sectigo.com", "-o", tsRespPath]);
-
-      // 3️⃣ Inject Timestamp Token into CMS using ASN.1
-      const cmsBuffer = fs.readFileSync(cmsPath);
-      const tsrBuffer = fs.readFileSync(tsRespPath);
-
-      const signedData = this.injectTimestamp(cmsBuffer, tsrBuffer);
-      
-      console.log(`✅ CMS signature with injected timestamp created (${signedData.length} bytes)`);
-      return Buffer.from(signedData);
-
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (sign.status !== 0 || !fs.existsSync(cmsPath)) {
+      console.error("OpenSSL CMS Error:", sign.stderr?.toString());
+      throw new Error(`OpenSSL failed to create CMS: ${sign.stderr?.toString()}`);
     }
+
+    // 2️⃣ Create RFC3161 Query
+    // Use -sha256 flag as seen in your help output
+    const query = spawnSync("openssl", [
+      "ts", "-query", 
+      "-data", cmsPath, 
+      "-sha256", 
+      "-cert", 
+      "-out", tsQueryPath
+    ]);
+
+    if (query.status !== 0 || !fs.existsSync(tsQueryPath)) {
+        throw new Error(`TS Query failed: ${query.stderr?.toString()}`);
+    }
+    
+    // 3️⃣ Fetch from Sectigo
+    const curl = spawnSync("curl", [
+      "-s", "-H", "Content-Type: application/timestamp-query", 
+      "--data-binary", `@${tsQueryPath}`, 
+      "http://timestamp.sectigo.com", 
+      "-o", tsRespPath
+    ]);
+
+    if (!fs.existsSync(tsRespPath) || fs.statSync(tsRespPath).size === 0) {
+        throw new Error("Failed to receive timestamp response from Sectigo");
+    }
+
+    // 4️⃣ Inject Timestamp Token into CMS
+    const cmsBuffer = fs.readFileSync(cmsPath);
+    const tsrBuffer = fs.readFileSync(tsRespPath);
+
+    const signedData = this.injectTimestamp(cmsBuffer, tsrBuffer);
+    
+    return Buffer.from(signedData);
+
+  } finally {
+    // Keep files in dev if you need to inspect them, otherwise cleanup
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+}
 
   injectTimestamp(cmsBuffer, tsrBuffer) {
     // Parse the CMS
