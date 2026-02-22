@@ -18,17 +18,20 @@ class ExternalSigner extends Signer {
     const tsQueryPath = path.join(tmpDir, "tsq.der");
     const tsRespPath = path.join(tmpDir, "tsr.der");
 
-    // Ensure we use the Homebrew OpenSSL path from your ENV
     const openssl = process.env.OPENSSL_BIN || "/opt/homebrew/opt/openssl@3/bin/openssl";
     const opensslConf = process.env.OPENSSL_CONF;
 
     fs.writeFileSync(dataPath, bufferToSign);
 
     try {
-      console.log("🔐 Generating CMS signature via OpenSSL 3 + PKCS#11...");
-
       // 1️⃣ Create Initial CMS signature
-      const signArgs = [
+      console.log("🔐 Generating CMS signature via OpenSSL 3 + PKCS#11...");
+      
+      const signArgs = [];
+      // Global options MUST come before the command (cms)
+      if (opensslConf) signArgs.push("-config", opensslConf);
+      
+      signArgs.push(
         "cms", "-sign", "-binary",
         "-in", dataPath,
         "-signer", process.env.CERT_FILE,
@@ -37,10 +40,8 @@ class ExternalSigner extends Signer {
         "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
         "-outform", "DER",
         "-sha256",
-        "-out", cmsPath,
-      ];
-
-      if (opensslConf) signArgs.unshift("-config", opensslConf);
+        "-out", cmsPath
+      );
 
       const sign = spawnSync(openssl, signArgs, { encoding: null });
 
@@ -51,15 +52,18 @@ class ExternalSigner extends Signer {
 
       // 2️⃣ Create RFC3161 Timestamp Query
       console.log("⏳ Requesting RFC3161 timestamp from Sectigo...");
-      const tsArgs = [
+      
+      const tsArgs = [];
+      // Global options MUST come before the command (ts)
+      if (opensslConf) tsArgs.push("-config", opensslConf);
+      
+      tsArgs.push(
         "ts", "-query",
         "-data", cmsPath,
         "-sha256",
         "-cert",
         "-out", tsQueryPath
-      ];
-      
-      if (opensslConf) tsArgs.unshift("-config", opensslConf);
+      );
 
       const query = spawnSync(openssl, tsArgs);
       if (query.status !== 0 || !fs.existsSync(tsQueryPath)) {
@@ -98,17 +102,18 @@ class ExternalSigner extends Signer {
   }
 
   injectTimestamp(cmsBuffer, tsrBuffer) {
-    // Convert Buffer to ArrayBuffer for pkijs
     const cmsArrayBuffer = cmsBuffer.buffer.slice(cmsBuffer.byteOffset, cmsBuffer.byteOffset + cmsBuffer.byteLength);
     const tsrArrayBuffer = tsrBuffer.buffer.slice(tsrBuffer.byteOffset, tsrBuffer.byteOffset + tsrBuffer.byteLength);
 
-    // Parse CMS
     const asn1 = asn1js.fromBER(cmsArrayBuffer);
+    if (asn1.offset === -1) throw new Error("Failed to parse CMS ASN.1");
+    
     const contentInfo = new pkijs.ContentInfo({ schema: asn1.result });
     const signedData = new pkijs.SignedData({ schema: contentInfo.content });
 
-    // Parse Timestamp Response
     const tsrAsn1 = asn1js.fromBER(tsrArrayBuffer);
+    if (tsrAsn1.offset === -1) throw new Error("Failed to parse TSR ASN.1");
+    
     const tsrInfo = new pkijs.TimeStampResp({ schema: tsrAsn1.result });
     
     if (!tsrInfo.timeStampToken) {
@@ -117,16 +122,14 @@ class ExternalSigner extends Signer {
 
     const tsToken = tsrInfo.timeStampToken;
 
-    // Inject into unsignedAttributes of the primary signer
     const signer = signedData.signerInfos[0];
     signer.unsignedAttributes = signer.unsignedAttributes || new pkijs.SignedAndUnsignedAttributes({ type: 1 });
     
     signer.unsignedAttributes.attributes.push(new pkijs.Attribute({
-      type: "1.2.840.113549.1.9.16.2.14", // id-aa-timeStampToken OID
+      type: "1.2.840.113549.1.9.16.2.14", // id-aa-timeStampToken
       values: [tsToken.toSchema()]
     }));
 
-    // Re-encode CMS
     return signedData.toContentInfo().toBER(false);
   }
 }
