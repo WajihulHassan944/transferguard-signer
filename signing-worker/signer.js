@@ -95,12 +95,17 @@ class ExternalSigner extends Signer {
         "-outform", "DER",
         "-out", finalCmsPath,
       ]);
+if (resign.status !== 0) {
+  console.error("❌ OpenSSL resign failed:");
+  console.error(resign.stderr?.toString());
+  throw new Error("CMS resign failed");
+}
 
-      if (resign.status !== 0) {
-        throw new Error(resign.stderr?.toString());
-      }
+if (!fs.existsSync(finalCmsPath)) {
+  throw new Error("final.der was not created by OpenSSL");
+}
 
-      const finalSignature = fs.readFileSync(finalCmsPath);
+const finalSignature = fs.readFileSync(finalCmsPath);
       console.log(`✅ CMS signature with embedded timestamp created (${finalSignature.length} bytes)`);
 
       return finalSignature;
