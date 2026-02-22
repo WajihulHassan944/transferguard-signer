@@ -5,8 +5,6 @@ import { spawnSync } from "child_process";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import * as asn1js from "asn1js";
-import * as pkijs from "pkijs";
 
 const SIGNATURE_LENGTH = 32768;
 
@@ -26,11 +24,13 @@ class ExternalSigner extends Signer {
     try {
       // 1️⃣ Create Initial CMS signature
       console.log("🔐 Generating CMS signature via OpenSSL 3 + PKCS#11...");
-      
+
       const signArgs = [];
-      // Global options MUST come before the command (cms)
-      if (opensslConf) signArgs.push("-config", opensslConf);
-      
+      // Only add -config if the OPENSSL_CONF environment variable is set
+      if (opensslConf) {
+        signArgs.push("-config", opensslConf);
+      }
+
       signArgs.push(
         "cms", "-sign", "-binary",
         "-in", dataPath,
@@ -38,13 +38,10 @@ class ExternalSigner extends Signer {
         "-certfile", process.env.INTERMEDIATE_CERT,
         "-engine", "pkcs11", "-keyform", "engine",
         "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
-        "-outform", "DER",
-        "-sha256",
-        "-out", cmsPath
+        "-outform", "DER", "-sha256", "-out", cmsPath
       );
 
       const sign = spawnSync(openssl, signArgs, { encoding: null });
-
       if (sign.status !== 0 || !fs.existsSync(cmsPath)) {
         console.error("❌ OpenSSL CMS Error:", sign.stderr?.toString());
         throw new Error(`OpenSSL failed to create CMS: ${sign.stderr?.toString()}`);
@@ -52,16 +49,12 @@ class ExternalSigner extends Signer {
 
       // 2️⃣ Create RFC3161 Timestamp Query
       console.log("⏳ Requesting RFC3161 timestamp from Sectigo...");
-      
       const tsArgs = [];
-      // Global options MUST come before the command (ts)
       if (opensslConf) tsArgs.push("-config", opensslConf);
-      
+
       tsArgs.push(
         "ts", "-query",
-        "-data", cmsPath,
-        "-sha256",
-        "-cert",
+        "-data", cmsPath, "-sha256", "-cert",
         "-out", tsQueryPath
       );
 
@@ -74,8 +67,7 @@ class ExternalSigner extends Signer {
       const curl = spawnSync("curl", [
         "-s", "-H", "Content-Type: application/timestamp-query",
         "--data-binary", `@${tsQueryPath}`,
-        "http://timestamp.sectigo.com",
-        "-o", tsRespPath
+        "http://timestamp.sectigo.com", "-o", tsRespPath
       ]);
 
       if (!fs.existsSync(tsRespPath) || fs.statSync(tsRespPath).size === 0) {
@@ -87,10 +79,9 @@ class ExternalSigner extends Signer {
       const tsrBuffer = fs.readFileSync(tsRespPath);
 
       const signedData = this.injectTimestamp(cmsBuffer, tsrBuffer);
-      
+
       console.log(`✅ CMS signature with injected timestamp created (${signedData.length} bytes)`);
       return Buffer.from(signedData);
-
     } finally {
       // Cleanup temp files
       try {
@@ -107,24 +98,24 @@ class ExternalSigner extends Signer {
 
     const asn1 = asn1js.fromBER(cmsArrayBuffer);
     if (asn1.offset === -1) throw new Error("Failed to parse CMS ASN.1");
-    
+
     const contentInfo = new pkijs.ContentInfo({ schema: asn1.result });
     const signedData = new pkijs.SignedData({ schema: contentInfo.content });
 
     const tsrAsn1 = asn1js.fromBER(tsrArrayBuffer);
     if (tsrAsn1.offset === -1) throw new Error("Failed to parse TSR ASN.1");
-    
+
     const tsrInfo = new pkijs.TimeStampResp({ schema: tsrAsn1.result });
-    
+
     if (!tsrInfo.timeStampToken) {
-        throw new Error("Timestamp response does not contain a valid token");
+      throw new Error("Timestamp response does not contain a valid token");
     }
 
     const tsToken = tsrInfo.timeStampToken;
 
     const signer = signedData.signerInfos[0];
     signer.unsignedAttributes = signer.unsignedAttributes || new pkijs.SignedAndUnsignedAttributes({ type: 1 });
-    
+
     signer.unsignedAttributes.attributes.push(new pkijs.Attribute({
       type: "1.2.840.113549.1.9.16.2.14", // id-aa-timeStampToken
       values: [tsToken.toSchema()]
@@ -141,7 +132,6 @@ export async function signBuffer(pdfBuffer) {
   }
 
   console.log("🚀 Starting production-grade PDF signing...");
-
   const pdfWithPlaceholder = plainAddPlaceholder({
     pdfBuffer,
     reason: "TransferGuard Legal Seal",
@@ -150,11 +140,7 @@ export async function signBuffer(pdfBuffer) {
 
   const signPdf = new SignPdf();
   const signerInstance = new ExternalSigner();
-
-  const signedPdfBuffer = await signPdf.sign(
-    pdfWithPlaceholder,
-    signerInstance
-  );
+  const signedPdfBuffer = await signPdf.sign(pdfWithPlaceholder, signerInstance);
 
   console.log("🎉 PDF successfully signed with RFC3161 timestamp!");
   return signedPdfBuffer;
