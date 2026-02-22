@@ -27,6 +27,7 @@ class ExternalSigner extends Signer {
 
       const signArgs = [];
       // Only add -config if the OPENSSL_CONF environment variable is set
+      // Removed '-config' argument if it's not necessary for the operation
       if (opensslConf) {
         signArgs.push("-config", opensslConf);
       }
