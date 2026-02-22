@@ -41,7 +41,7 @@ class ExternalSigner extends Signer {
           "-md", "sha256",
           "-nosmimecap",  
           // Note: If Adobe still complains, we will remove "-noattr" next.
-       "-tsa", "http://timestamp.sectigo.com",
+          "-noattr",
           "-out", cmsFile,
         ],
         { 
