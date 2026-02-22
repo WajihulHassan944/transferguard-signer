@@ -87,10 +87,10 @@ class ExternalSigner extends Signer {
       // 4️⃣ Inject Timestamp Token into CMS
       const cmsBuffer = fs.readFileSync(cmsPath);
       const tsrBuffer = fs.readFileSync(tsRespPath);
-      const signedData = this.injectTimestamp(cmsBuffer, tsrBuffer);
+      const signedDataBuffer = this.injectTimestamp(cmsBuffer, tsrBuffer);
       
-      console.log(`✅ CMS signature with injected timestamp created (${signedData.length} bytes)`);
-      return Buffer.from(signedData);
+      console.log(`✅ CMS signature with injected timestamp created (${signedDataBuffer.length} bytes)`);
+      return signedDataBuffer;
 
     } finally {
       try {
@@ -105,21 +105,18 @@ class ExternalSigner extends Signer {
     const cmsArrayBuffer = cmsBuffer.buffer.slice(cmsBuffer.byteOffset, cmsBuffer.byteOffset + cmsBuffer.byteLength);
     const tsrArrayBuffer = tsrBuffer.buffer.slice(tsrBuffer.byteOffset, tsrBuffer.byteOffset + tsrBuffer.byteLength);
 
-    // Parse CMS
     const asn1 = asn1js.fromBER(cmsArrayBuffer);
     if (asn1.offset === -1) throw new Error("Failed to parse CMS ASN.1");
     
     const contentInfo = new pkijs.ContentInfo({ schema: asn1.result });
     const signedData = new pkijs.SignedData({ schema: contentInfo.content });
 
-    // Parse Timestamp Response
     const tsrAsn1 = asn1js.fromBER(tsrArrayBuffer);
     if (tsrAsn1.offset === -1) throw new Error("Failed to parse TSR ASN.1");
     
     const tsrInfo = new pkijs.TimeStampResp({ schema: tsrAsn1.result });
     if (!tsrInfo.timeStampToken) throw new Error("Timestamp response missing token");
 
-    // Inject into unsignedAttributes
     const signer = signedData.signerInfos[0];
     signer.unsignedAttributes = signer.unsignedAttributes || new pkijs.SignedAndUnsignedAttributes({ type: 1 });
     
@@ -128,14 +125,13 @@ class ExternalSigner extends Signer {
       values: [tsrInfo.timeStampToken.toSchema()]
     }));
 
-    // Wrap SignedData back into ContentInfo
     const finalContentInfo = new pkijs.ContentInfo({
       contentType: "1.2.840.113549.1.7.2", // id-signedData
       content: signedData.toSchema()
     });
 
-    // FIXED: Correct conversion to BER buffer
-    return finalContentInfo.toSchema().toBER(false);
+    // Convert ArrayBuffer to Node.js Buffer for consistency
+    return Buffer.from(finalContentInfo.toSchema().toBER(false));
   }
 }
 
