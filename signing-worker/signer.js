@@ -8,111 +8,76 @@ import path from "path";
 
 const SIGNATURE_LENGTH = 32768;
 
+import * as asn1js from "asn1js";
+import * as pkijs from "pkijs";
+
 class ExternalSigner extends Signer {
   async sign(bufferToSign) {
-    console.log("🔐 Creating CMS signature + RFC3161 timestamp (OpenSSL 3 compatible)...");
-
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
     const dataPath = path.join(tmpDir, "data.bin");
     const cmsPath = path.join(tmpDir, "sig.der");
     const tsQueryPath = path.join(tmpDir, "tsq.der");
     const tsRespPath = path.join(tmpDir, "tsr.der");
-    const finalCmsPath = path.join(tmpDir, "final.der");
 
     fs.writeFileSync(dataPath, bufferToSign);
 
     try {
-      // 1️⃣ Create CMS signature (WITH attributes)
-      const sign = spawnSync(
-        process.env.OPENSSL_BIN || "openssl",
-        [
-          "cms",
-          "-sign",
-          "-binary",
-          "-in", dataPath,
-          "-signer", process.env.CERT_FILE,
-          "-certfile", process.env.INTERMEDIATE_CERT,
-          "-engine", "pkcs11",
-          "-keyform", "engine",
-          "-inkey",
-          `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
-          "-outform", "DER",
-          "-md", "sha256",
-          "-out", cmsPath,
-        ],
-        { encoding: null, maxBuffer: 20 * 1024 * 1024 }
-      );
-
-      if (sign.status !== 0) {
-        throw new Error(sign.stderr?.toString());
-      }
-
-      // 2️⃣ Create RFC3161 timestamp request
-      spawnSync("openssl", [
-        "ts",
-        "-query",
-        "-data", cmsPath,
-        "-sha256",
-        "-cert",
-        "-out", tsQueryPath,
-      ]);
-
-      // 3️⃣ Send to Sectigo TSA
-      spawnSync("curl", [
-        "-s",
-        "-H", "Content-Type: application/timestamp-query",
-        "--data-binary", `@${tsQueryPath}`,
-        "http://timestamp.sectigo.com",
-        "-o", tsRespPath,
-      ]);
-
-      // 4️⃣ Verify timestamp
-      const verify = spawnSync("openssl", [
-        "ts",
-        "-verify",
-        "-data", cmsPath,
-        "-in", tsRespPath,
-        "-CAfile", process.env.INTERMEDIATE_CERT,
-      ]);
-
-      if (verify.status !== 0) {
-        throw new Error("Timestamp verification failed");
-      }
-
-      // 5️⃣ Attach timestamp as unsigned attribute
-      const resign = spawnSync("openssl", [
-        "cms",
-        "-resign",
-        "-binary",
-        "-inform", "DER",
-        "-in", cmsPath,
+      // 1️⃣ Create Initial CMS signature
+      const sign = spawnSync("openssl", [
+        "cms", "-sign", "-binary",
+        "-in", dataPath,
         "-signer", process.env.CERT_FILE,
         "-certfile", process.env.INTERMEDIATE_CERT,
-        "-engine", "pkcs11",
-        "-keyform", "engine",
-        "-inkey",
-        `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
-        "-outform", "DER",
-        "-out", finalCmsPath,
+        "-engine", "pkcs11", "-keyform", "engine",
+        "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
+        "-outform", "DER", "-md", "sha256",
+        "-out", cmsPath,
       ]);
-if (resign.status !== 0) {
-  console.error("❌ OpenSSL resign failed:");
-  console.error(resign.stderr?.toString());
-  throw new Error("CMS resign failed");
-}
 
-if (!fs.existsSync(finalCmsPath)) {
-  throw new Error("final.der was not created by OpenSSL");
-}
+      if (sign.status !== 0) throw new Error(sign.stderr?.toString());
 
-const finalSignature = fs.readFileSync(finalCmsPath);
-      console.log(`✅ CMS signature with embedded timestamp created (${finalSignature.length} bytes)`);
+      // 2️⃣ Create and Fetch Timestamp (Sectigo)
+      spawnSync("openssl", ["ts", "-query", "-data", cmsPath, "-sha256", "-cert", "-out", tsQueryPath]);
+      
+      spawnSync("curl", ["-s", "-H", "Content-Type: application/timestamp-query", "--data-binary", `@${tsQueryPath}`, "http://timestamp.sectigo.com", "-o", tsRespPath]);
 
-      return finalSignature;
+      // 3️⃣ Inject Timestamp Token into CMS using ASN.1
+      const cmsBuffer = fs.readFileSync(cmsPath);
+      const tsrBuffer = fs.readFileSync(tsRespPath);
+
+      const signedData = this.injectTimestamp(cmsBuffer, tsrBuffer);
+      
+      console.log(`✅ CMS signature with injected timestamp created (${signedData.length} bytes)`);
+      return Buffer.from(signedData);
 
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  }
+
+  injectTimestamp(cmsBuffer, tsrBuffer) {
+    // Parse the CMS
+    const asn1 = asn1js.fromBER(cmsBuffer.buffer.slice(cmsBuffer.byteOffset, cmsBuffer.byteOffset + cmsBuffer.byteLength));
+    const contentInfo = new pkijs.ContentInfo({ schema: asn1.result });
+    const signedData = new pkijs.SignedData({ schema: contentInfo.content });
+
+    // Parse the Timestamp Response (TSR)
+    const tsrAsn1 = asn1js.fromBER(tsrBuffer.buffer.slice(tsrBuffer.byteOffset, tsrBuffer.byteOffset + tsrBuffer.byteLength));
+    const tsrInfo = new pkijs.TimeStampResp({ schema: tsrAsn1.result });
+    
+    // We need the 'timeStampToken' part of the response
+    const tsToken = tsrInfo.timeStampToken;
+
+    // Add to unsignedAttributes of the first signer
+    const signer = signedData.signerInfos[0];
+    signer.unsignedAttributes = signer.unsignedAttributes || new pkijs.SignedAndUnsignedAttributes({ type: 1 });
+    
+    signer.unsignedAttributes.attributes.push(new pkijs.Attribute({
+      type: "1.2.840.113549.1.9.16.2.14", // id-aa-timeStampToken
+      values: [tsToken.toSchema()]
+    }));
+
+    return signedData.toContentInfo().toBER(false);
   }
 }
 
