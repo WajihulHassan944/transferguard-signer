@@ -5,106 +5,128 @@ import { spawnSync } from "child_process";
 import fs from "fs";
 import os from "os";
 import path from "path";
-
-const SIGNATURE_LENGTH = 32768;
-
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 
+const SIGNATURE_LENGTH = 32768;
+
 class ExternalSigner extends Signer {
- // ... inside ExternalSigner class ...
+  async sign(bufferToSign) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
+    const dataPath = path.join(tmpDir, "data.bin");
+    const cmsPath = path.join(tmpDir, "sig.der");
+    const tsQueryPath = path.join(tmpDir, "tsq.der");
+    const tsRespPath = path.join(tmpDir, "tsr.der");
 
-async sign(bufferToSign) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
-  const dataPath = path.join(tmpDir, "data.bin");
-  const cmsPath = path.join(tmpDir, "sig.der");
-  const tsQueryPath = path.join(tmpDir, "tsq.der");
-  const tsRespPath = path.join(tmpDir, "tsr.der");
+    // Ensure we use the Homebrew OpenSSL path from your ENV
+    const openssl = process.env.OPENSSL_BIN || "/opt/homebrew/opt/openssl@3/bin/openssl";
+    const opensslConf = process.env.OPENSSL_CONF;
 
-  fs.writeFileSync(dataPath, bufferToSign);
+    fs.writeFileSync(dataPath, bufferToSign);
 
-  try {
-    // 1️⃣ Create Initial CMS signature
-    // Added -sha256 explicitly as a command flag
-    const sign = spawnSync("openssl", [
-      "cms", "-sign", "-binary",
-      "-in", dataPath,
-      "-signer", process.env.CERT_FILE,
-      "-certfile", process.env.INTERMEDIATE_CERT,
-      "-engine", "pkcs11", "-keyform", "engine",
-      "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
-      "-outform", "DER", 
-      "-sha256", // Use this instead of -md sha256 for better compatibility
-      "-out", cmsPath,
-    ]);
+    try {
+      console.log("🔐 Generating CMS signature via OpenSSL 3 + PKCS#11...");
 
-    if (sign.status !== 0 || !fs.existsSync(cmsPath)) {
-      console.error("OpenSSL CMS Error:", sign.stderr?.toString());
-      throw new Error(`OpenSSL failed to create CMS: ${sign.stderr?.toString()}`);
-    }
+      // 1️⃣ Create Initial CMS signature
+      const signArgs = [
+        "cms", "-sign", "-binary",
+        "-in", dataPath,
+        "-signer", process.env.CERT_FILE,
+        "-certfile", process.env.INTERMEDIATE_CERT,
+        "-engine", "pkcs11", "-keyform", "engine",
+        "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
+        "-outform", "DER",
+        "-sha256",
+        "-out", cmsPath,
+      ];
 
-    // 2️⃣ Create RFC3161 Query
-    // Use -sha256 flag as seen in your help output
-    const query = spawnSync("openssl", [
-      "ts", "-query", 
-      "-data", cmsPath, 
-      "-sha256", 
-      "-cert", 
-      "-out", tsQueryPath
-    ]);
+      if (opensslConf) signArgs.unshift("-config", opensslConf);
 
-    if (query.status !== 0 || !fs.existsSync(tsQueryPath)) {
+      const sign = spawnSync(openssl, signArgs, { encoding: null });
+
+      if (sign.status !== 0 || !fs.existsSync(cmsPath)) {
+        console.error("❌ OpenSSL CMS Error:", sign.stderr?.toString());
+        throw new Error(`OpenSSL failed to create CMS: ${sign.stderr?.toString()}`);
+      }
+
+      // 2️⃣ Create RFC3161 Timestamp Query
+      console.log("⏳ Requesting RFC3161 timestamp from Sectigo...");
+      const tsArgs = [
+        "ts", "-query",
+        "-data", cmsPath,
+        "-sha256",
+        "-cert",
+        "-out", tsQueryPath
+      ];
+      
+      if (opensslConf) tsArgs.unshift("-config", opensslConf);
+
+      const query = spawnSync(openssl, tsArgs);
+      if (query.status !== 0 || !fs.existsSync(tsQueryPath)) {
         throw new Error(`TS Query failed: ${query.stderr?.toString()}`);
+      }
+
+      // 3️⃣ Fetch Timestamp Response from Sectigo
+      const curl = spawnSync("curl", [
+        "-s", "-H", "Content-Type: application/timestamp-query",
+        "--data-binary", `@${tsQueryPath}`,
+        "http://timestamp.sectigo.com",
+        "-o", tsRespPath
+      ]);
+
+      if (!fs.existsSync(tsRespPath) || fs.statSync(tsRespPath).size === 0) {
+        throw new Error("Failed to receive valid timestamp response from Sectigo");
+      }
+
+      // 4️⃣ Inject Timestamp Token into CMS using Node ASN.1 (pkijs)
+      const cmsBuffer = fs.readFileSync(cmsPath);
+      const tsrBuffer = fs.readFileSync(tsRespPath);
+
+      const signedData = this.injectTimestamp(cmsBuffer, tsrBuffer);
+      
+      console.log(`✅ CMS signature with injected timestamp created (${signedData.length} bytes)`);
+      return Buffer.from(signedData);
+
+    } finally {
+      // Cleanup temp files
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch (err) {
+        console.error("Temp cleanup error:", err);
+      }
     }
-    
-    // 3️⃣ Fetch from Sectigo
-    const curl = spawnSync("curl", [
-      "-s", "-H", "Content-Type: application/timestamp-query", 
-      "--data-binary", `@${tsQueryPath}`, 
-      "http://timestamp.sectigo.com", 
-      "-o", tsRespPath
-    ]);
-
-    if (!fs.existsSync(tsRespPath) || fs.statSync(tsRespPath).size === 0) {
-        throw new Error("Failed to receive timestamp response from Sectigo");
-    }
-
-    // 4️⃣ Inject Timestamp Token into CMS
-    const cmsBuffer = fs.readFileSync(cmsPath);
-    const tsrBuffer = fs.readFileSync(tsRespPath);
-
-    const signedData = this.injectTimestamp(cmsBuffer, tsrBuffer);
-    
-    return Buffer.from(signedData);
-
-  } finally {
-    // Keep files in dev if you need to inspect them, otherwise cleanup
-    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
-}
 
   injectTimestamp(cmsBuffer, tsrBuffer) {
-    // Parse the CMS
-    const asn1 = asn1js.fromBER(cmsBuffer.buffer.slice(cmsBuffer.byteOffset, cmsBuffer.byteOffset + cmsBuffer.byteLength));
+    // Convert Buffer to ArrayBuffer for pkijs
+    const cmsArrayBuffer = cmsBuffer.buffer.slice(cmsBuffer.byteOffset, cmsBuffer.byteOffset + cmsBuffer.byteLength);
+    const tsrArrayBuffer = tsrBuffer.buffer.slice(tsrBuffer.byteOffset, tsrBuffer.byteOffset + tsrBuffer.byteLength);
+
+    // Parse CMS
+    const asn1 = asn1js.fromBER(cmsArrayBuffer);
     const contentInfo = new pkijs.ContentInfo({ schema: asn1.result });
     const signedData = new pkijs.SignedData({ schema: contentInfo.content });
 
-    // Parse the Timestamp Response (TSR)
-    const tsrAsn1 = asn1js.fromBER(tsrBuffer.buffer.slice(tsrBuffer.byteOffset, tsrBuffer.byteOffset + tsrBuffer.byteLength));
+    // Parse Timestamp Response
+    const tsrAsn1 = asn1js.fromBER(tsrArrayBuffer);
     const tsrInfo = new pkijs.TimeStampResp({ schema: tsrAsn1.result });
     
-    // We need the 'timeStampToken' part of the response
+    if (!tsrInfo.timeStampToken) {
+        throw new Error("Timestamp response does not contain a valid token");
+    }
+
     const tsToken = tsrInfo.timeStampToken;
 
-    // Add to unsignedAttributes of the first signer
+    // Inject into unsignedAttributes of the primary signer
     const signer = signedData.signerInfos[0];
     signer.unsignedAttributes = signer.unsignedAttributes || new pkijs.SignedAndUnsignedAttributes({ type: 1 });
     
     signer.unsignedAttributes.attributes.push(new pkijs.Attribute({
-      type: "1.2.840.113549.1.9.16.2.14", // id-aa-timeStampToken
+      type: "1.2.840.113549.1.9.16.2.14", // id-aa-timeStampToken OID
       values: [tsToken.toSchema()]
     }));
 
+    // Re-encode CMS
     return signedData.toContentInfo().toBER(false);
   }
 }
@@ -132,6 +154,5 @@ export async function signBuffer(pdfBuffer) {
   );
 
   console.log("🎉 PDF successfully signed with RFC3161 timestamp!");
-
   return signedPdfBuffer;
 }
