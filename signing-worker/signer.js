@@ -8,8 +8,7 @@ import path from "path";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 
-const SIGNATURE_LENGTH = 32768;
-
+const SIGNATURE_LENGTH = 1500000;
 class ExternalSigner extends Signer {
   async sign(bufferToSign) {
     console.log("🚀 Starting production-grade PAdES signing...");
