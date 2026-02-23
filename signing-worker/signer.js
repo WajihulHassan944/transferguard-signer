@@ -12,13 +12,15 @@ const SIGNATURE_LENGTH = 32768;
 
 class ExternalSigner extends Signer {
   async sign(bufferToSign) {
-    console.log("🚀 Starting production-grade PDF signing...");
+    console.log("🚀 Starting production-grade PAdES signing...");
 
     const certPath = process.env.CERT_FILE;
-    const intermediatePath = process.env.INTERMEDIATE_CERT;
-    
-    if (!fs.existsSync(certPath)) {
-      throw new Error(`❌ Missing CERT_FILE: ${certPath}`);
+    const chainPath = process.env.INTERMEDIATE_CERT; 
+
+    // Path Validation
+    if (!fs.existsSync(certPath)) throw new Error(`❌ Missing CERT_FILE: ${certPath}`);
+    if (!fs.existsSync(chainPath)) {
+        console.warn(`⚠️ Warning: full-chain.pem not found at ${chainPath}. Adobe might show trust errors.`);
     }
 
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
@@ -30,9 +32,9 @@ class ExternalSigner extends Signer {
     fs.writeFileSync(dataPath, bufferToSign);
 
     try {
-      const openssl = process.env.OPENSSL_BIN || "/opt/homebrew/opt/openssl@3/bin/openssl";
+      const openssl = process.env.OPENSSL_BIN;
 
-      // 1️⃣ Create CMS signature
+      // 1️⃣ Generate CMS signature using the Token + Full Chain
       console.log("🔐 Generating CMS signature via Hardware Token...");
       const signArgs = [
         "cms", "-sign", "-binary",
@@ -42,62 +44,58 @@ class ExternalSigner extends Signer {
         "-keyform", "engine",
         "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
         "-outform", "DER",
-        "-md", "sha256", 
+        "-md", "sha256",
+        "-nosmimecap", // FIX: Removes S/MIME attributes that cause "Suspicious Data" errors
+        "-nodetach",
         "-out", cmsPath,
       ];
 
-      if (intermediatePath && fs.existsSync(intermediatePath)) {
-        signArgs.push("-certfile", intermediatePath);
+      // Inject the verified chain (Intermediate + Root) into the signature
+      if (chainPath && fs.existsSync(chainPath)) {
+        signArgs.push("-certfile", chainPath);
       }
 
       const sign = spawnSync(openssl, signArgs, {
         encoding: null,
         env: {
           ...process.env,
-          OPENSSL_CONF: process.env.OPENSSL_CONF,
           PKCS11_MODULE_PATH: process.env.PKCS11_MODULE 
         },
       });
 
-      if (sign.status !== 0 || !fs.existsSync(cmsPath)) {
-        throw new Error(`OpenSSL CMS failed: ${sign.stderr?.toString()}`);
+      if (sign.status !== 0) {
+        console.error("❌ OpenSSL CMS Error:", sign.stderr?.toString());
+        throw new Error("OpenSSL CMS command failed. Check token connection and PIN.");
       }
 
       // 2️⃣ Create RFC3161 Timestamp Query
-      console.log("⏳ Requesting RFC3161 timestamp from Sectigo...");
+      console.log("⏳ Requesting RFC3161 timestamp...");
       const tsArgs = ["ts", "-query", "-data", cmsPath, "-sha256", "-cert", "-out", tsQueryPath];
-      const query = spawnSync(openssl, tsArgs, { 
-        env: { ...process.env, OPENSSL_CONF: process.env.OPENSSL_CONF } 
-      });
+      spawnSync(openssl, tsArgs, { env: process.env });
 
-      if (query.status !== 0) throw new Error(`TS Query failed: ${query.stderr?.toString()}`);
-
-      // 3️⃣ Fetch Timestamp Response
-      const curl = spawnSync("curl", [
+      // 3️⃣ Fetch Timestamp Response from Sectigo
+      const curlResponse = spawnSync("curl", [
         "-s", "-H", "Content-Type: application/timestamp-query",
         "--data-binary", `@${tsQueryPath}`,
-        "http://timestamp.sectigo.com",
+        process.env.TSA_URL,
         "-o", tsRespPath
       ]);
 
       if (!fs.existsSync(tsRespPath) || fs.statSync(tsRespPath).size === 0) {
-        throw new Error("Failed to receive timestamp response from Sectigo");
+        throw new Error("Failed to receive timestamp response from TSA.");
       }
 
-      // 4️⃣ Inject Timestamp Token into CMS
+      // 4️⃣ Inject Timestamp Token into CMS Unsigned Attributes
       const cmsBuffer = fs.readFileSync(cmsPath);
       const tsrBuffer = fs.readFileSync(tsRespPath);
       const signedDataBuffer = this.injectTimestamp(cmsBuffer, tsrBuffer);
       
-      console.log(`✅ CMS signature with injected timestamp created (${signedDataBuffer.length} bytes)`);
+      console.log(`✅ Signature Complete: ${signedDataBuffer.length} bytes`);
       return signedDataBuffer;
 
     } finally {
-      try {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch (err) {
-        console.error("⚠️ Temp cleanup error:", err);
-      }
+      // Clean up temporary files
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   }
 
@@ -106,46 +104,49 @@ class ExternalSigner extends Signer {
     const tsrArrayBuffer = tsrBuffer.buffer.slice(tsrBuffer.byteOffset, tsrBuffer.byteOffset + tsrBuffer.byteLength);
 
     const asn1 = asn1js.fromBER(cmsArrayBuffer);
-    if (asn1.offset === -1) throw new Error("Failed to parse CMS ASN.1");
-    
     const contentInfo = new pkijs.ContentInfo({ schema: asn1.result });
     const signedData = new pkijs.SignedData({ schema: contentInfo.content });
 
     const tsrAsn1 = asn1js.fromBER(tsrArrayBuffer);
-    if (tsrAsn1.offset === -1) throw new Error("Failed to parse TSR ASN.1");
-    
     const tsrInfo = new pkijs.TimeStampResp({ schema: tsrAsn1.result });
-    if (!tsrInfo.timeStampToken) throw new Error("Timestamp response missing token");
 
     const signer = signedData.signerInfos[0];
-    signer.unsignedAttributes = signer.unsignedAttributes || new pkijs.SignedAndUnsignedAttributes({ type: 1 });
     
+    // Initialize unsigned attributes if they don't exist
+    if (!signer.unsignedAttributes) {
+        signer.unsignedAttributes = new pkijs.SignedAndUnsignedAttributes({
+            type: 1, 
+            attributes: []
+        });
+    }
+
+    // Add the timestamp token attribute (OID: 1.2.840.113549.1.9.16.2.14)
     signer.unsignedAttributes.attributes.push(new pkijs.Attribute({
-      type: "1.2.840.113549.1.9.16.2.14", // id-aa-timeStampToken
+      type: "1.2.840.113549.1.9.16.2.14",
       values: [tsrInfo.timeStampToken.toSchema()]
     }));
 
     const finalContentInfo = new pkijs.ContentInfo({
-      contentType: "1.2.840.113549.1.7.2", // id-signedData
+      contentType: "1.2.840.113549.1.7.2",
       content: signedData.toSchema()
     });
 
-    // Convert ArrayBuffer to Node.js Buffer for consistency
-    return Buffer.from(finalContentInfo.toSchema().toBER(false));
+    // Use Definite Length Encoding for strict Adobe Parser compatibility
+    return Buffer.from(finalContentInfo.toSchema().toBER(true));
   }
 }
 
 export async function signBuffer(pdfBuffer) {
-  if (process.env.NODE_ENV === "development") return pdfBuffer;
-
+  if (process.env.NODE_ENV === "development") {
+    console.log("⚠️ Development mode: Skipping hardware signature.");
+    return pdfBuffer;
+  }
+  
   const pdfWithPlaceholder = plainAddPlaceholder({
     pdfBuffer,
     reason: "TransferGuard Legal Seal",
     signatureLength: SIGNATURE_LENGTH,
   });
 
-  const signPdf = new SignPdf();
-  const signerInstance = new ExternalSigner();
-
-  return await signPdf.sign(pdfWithPlaceholder, signerInstance);
+  return await new SignPdf().sign(pdfWithPlaceholder, new ExternalSigner());
 }
