@@ -99,6 +99,7 @@ class ExternalSigner extends Signer {
   }
 
   injectTimestamp(cmsBuffer, tsrBuffer) {
+    
     const cmsArrayBuffer = cmsBuffer.buffer.slice(cmsBuffer.byteOffset, cmsBuffer.byteOffset + cmsBuffer.byteLength);
     const tsrArrayBuffer = tsrBuffer.buffer.slice(tsrBuffer.byteOffset, tsrBuffer.byteOffset + tsrBuffer.byteLength);
 
@@ -110,7 +111,9 @@ class ExternalSigner extends Signer {
     const tsrInfo = new pkijs.TimeStampResp({ schema: tsrAsn1.result });
 
     const signer = signedData.signerInfos[0];
-    
+    if (!tsrInfo.timeStampToken) {
+  throw new Error("TSA response does not contain a timeStampToken.");
+}
     // Initialize unsigned attributes if they don't exist
     if (!signer.unsignedAttributes) {
         signer.unsignedAttributes = new pkijs.SignedAndUnsignedAttributes({
