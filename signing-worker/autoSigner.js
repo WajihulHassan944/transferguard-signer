@@ -120,7 +120,7 @@ const transferData = {
   // TRANSFER SUMMARY
   // ======================
   file_name: files?.name || "Unknown_File",
-  file_size: `${(transfer.total_size_bytes / 1024).toFixed(2)} KB`,
+  file_size_bytes: transfer.total_size_bytes,
   sha256_hash: transfer.sha256_hash || transfer.encrypted_password,
   transfer_status: "Successfully Downloaded & Client Check via Email Verification",
   chosen_verification: transfer.verification_method || "Email Verification",

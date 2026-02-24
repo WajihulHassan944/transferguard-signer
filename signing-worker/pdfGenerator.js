@@ -4,6 +4,29 @@ import path from "path";
 
 export async function generatePDF(data) {
   const templatePath = path.resolve("signing-worker/template.html");
+const getBrowserName = (userAgent) => {
+  if (!userAgent) return "Unknown Browser";
+
+  if (userAgent.includes("Edg")) return "Microsoft Edge";
+  if (userAgent.includes("Chrome")) return "Google Chrome";
+  if (userAgent.includes("Firefox")) return "Mozilla Firefox";
+  if (userAgent.includes("Safari") && !userAgent.includes("Chrome"))
+    return "Safari";
+
+  return "Web Browser";
+};
+
+const getOSName = (userAgent) => {
+  if (!userAgent) return "Unknown OS";
+
+  if (userAgent.includes("Windows NT 10")) return "Windows 10";
+  if (userAgent.includes("Windows NT 11")) return "Windows 11";
+  if (userAgent.includes("Mac OS X")) return "macOS";
+  if (userAgent.includes("Android")) return "Android";
+  if (userAgent.includes("iPhone")) return "iOS";
+
+  return "Desktop";
+};
   let html = fs.readFileSync(templatePath, "utf8");
 
   // ---------------------------
@@ -48,23 +71,13 @@ export async function generatePDF(data) {
     return mb.toFixed(2) + " MB";
   };
 
+const cleanBrowser = getBrowserName(data.browser);
+const cleanOS = getOSName(data.browser);
+
   // ---------------------------
   // Parse audit_log_json safely
   // ---------------------------
-  let audit = {};
-  try {
-    audit =
-      typeof data.audit_log_json === "string"
-        ? JSON.parse(data.audit_log_json)
-        : data.audit_log_json || {};
-  } catch {
-    audit = {};
-  }
-
-  const location = [audit.city, audit.region, audit.country]
-    .filter(Boolean)
-    .join(", ");
-
+  
   // ============================================================
   // PROFESSIONAL PLAN (EMAIL VERIFICATION ONLY)
   // ============================================================
@@ -123,11 +136,10 @@ export async function generatePDF(data) {
     // TECHNICAL AUDIT LOG
     // ======================
     .replaceAll("{{IP_ADDRESS}}", escape(data.ip_address))
-    .replaceAll("{{LOCATION}}", escape(location))
-    .replaceAll("{{DEVICE_OS}}", escape(audit.device_type))
-    .replaceAll("{{BROWSER}}", escape(audit.user_agent))
-
-    // ======================
+.replaceAll("{{LOCATION}}", escape(data.location))
+.replaceAll("{{DEVICE_OS}}", escape(cleanOS))
+.replaceAll("{{BROWSER}}", escape(cleanBrowser))
+// ======================
     // LEGAL COMPLIANCE
     // ======================
     .replaceAll("{{TSA_PROVIDER}}", escape(data.tsa_provider))
