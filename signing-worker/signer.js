@@ -73,8 +73,9 @@ class ExternalSigner extends Signer {
     }
 
     injectPadesAttributes(cmsBuffer, tsrBuffer, certBuffer) {
-        const cmsArrayBuffer = new Uint8Array(cmsBuffer).buffer;
-        const tsrArrayBuffer = new Uint8Array(tsrBuffer).buffer;
+        // Safer conversion of Node Buffer to ArrayBuffer
+        const cmsArrayBuffer = cmsBuffer.buffer.slice(cmsBuffer.byteOffset, cmsBuffer.byteOffset + cmsBuffer.byteLength);
+        const tsrArrayBuffer = tsrBuffer.buffer.slice(tsrBuffer.byteOffset, tsrBuffer.byteOffset + tsrBuffer.byteLength);
         
         const asn1 = asn1js.fromBER(cmsArrayBuffer);
         const contentInfo = new pkijs.ContentInfo({ schema: asn1.result });
@@ -82,17 +83,25 @@ class ExternalSigner extends Signer {
         const signer = signedData.signerInfos[0];
 
         // --- A. ADD ESS-signing-certificate-v2 (PAdES Requirement) ---
-        // This stops the "signing-certificate attribute is absent" error
+        // FIX: Using ESSCertIDv2 (the correct class name for modern pkijs)
         const certHash = crypto.createHash("sha256").update(certBuffer).digest();
         const essSigningCertV2 = new pkijs.ESSSigningCertificateV2({
-            certs: [new pkijs.SigningCertificateV2Cert({
+            certs: [new pkijs.ESSCertIDv2({
+                hashAlgorithm: new pkijs.AlgorithmIdentifier({
+                    algorithmId: "2.16.840.1.101.3.4.2.1" // OID for SHA-256
+                }),
                 certHash: new asn1js.OctetString({ valueHex: certHash })
             })]
         });
 
-        signer.signedAttributes = signer.signedAttributes || new pkijs.SignedAndUnsignedAttributes({ type: 0, attributes: [] });
+        // Ensure signedAttributes exists
+        if (!signer.signedAttributes) {
+            signer.signedAttributes = new pkijs.SignedAndUnsignedAttributes({ type: 0, attributes: [] });
+        }
+
+        // Add the signing certificate attribute (OID: 1.2.840.113549.1.9.16.2.47)
         signer.signedAttributes.attributes.push(new pkijs.Attribute({
-            type: "1.2.840.113549.1.9.16.2.47", // id-aa-signingCertificateV2
+            type: "1.2.840.113549.1.9.16.2.47", 
             values: [essSigningCertV2.toSchema()]
         }));
 
@@ -100,7 +109,10 @@ class ExternalSigner extends Signer {
         const tsrAsn1 = asn1js.fromBER(tsrArrayBuffer);
         const tsrInfo = new pkijs.TimeStampResp({ schema: tsrAsn1.result });
         
-        signer.unsignedAttributes = signer.unsignedAttributes || new pkijs.SignedAndUnsignedAttributes({ type: 1, attributes: [] });
+        if (!signer.unsignedAttributes) {
+            signer.unsignedAttributes = new pkijs.SignedAndUnsignedAttributes({ type: 1, attributes: [] });
+        }
+
         signer.unsignedAttributes.attributes.push(new pkijs.Attribute({
             type: "1.2.840.113549.1.9.16.2.14",
             values: [tsrInfo.timeStampToken.toSchema()]
