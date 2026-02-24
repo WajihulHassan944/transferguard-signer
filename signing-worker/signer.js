@@ -7,12 +7,13 @@ import os from "os";
 import path from "path";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
+import * as crypto from "crypto";
 
 const SIGNATURE_LENGTH = 35000;
 
 class ExternalSigner extends Signer {
     async sign(bufferToSign) {
-        console.log("🚀 Starting PAdES-compliant signing...");
+        console.log("🚀 Starting PAdES-B-T signing...");
 
         const certPath = process.env.CERT_FILE;
         const chainPath = process.env.INTERMEDIATE_CERT;
@@ -26,8 +27,7 @@ class ExternalSigner extends Signer {
         try {
             const openssl = process.env.OPENSSL_BIN || "/opt/homebrew/opt/openssl@3/bin/openssl";
 
-            // 1️⃣ Generate DETACHED CMS signature
-            // We use detached so the PDF doesn't get duplicated inside the signature
+            // 1️⃣ Generate CMS signature
             const signArgs = [
                 "cms", "-sign", "-binary",
                 "-in", dataPath,
@@ -49,63 +49,58 @@ class ExternalSigner extends Signer {
                 env: { ...process.env, PKCS11_MODULE_PATH: process.env.PKCS11_MODULE }
             });
 
-            if (sign.status !== 0) {
-                throw new Error(`OpenSSL Error: ${sign.stderr?.toString()}`);
-            }
+            if (sign.status !== 0) throw new Error(sign.stderr?.toString());
 
-            // 2️⃣ Generate Timestamp Query
-            console.log("⏳ Requesting RFC3161 timestamp...");
-            const tsQuery = spawnSync(openssl, [
-                "ts", "-query", "-data", cmsPath, "-sha256", "-cert"
-            ], { encoding: null });
-
-            if (tsQuery.status !== 0) throw new Error("TS Query failed");
-
-            // 3️⃣ Fetch Timestamp (using fetch for stability)
+            // 2️⃣ Request Timestamp
+            const tsQuery = spawnSync(openssl, ["ts", "-query", "-data", cmsPath, "-sha256", "-cert"], { encoding: null });
             const response = await fetch(process.env.TSA_URL || "http://timestamp.sectigo.com", {
                 method: "POST",
                 headers: { "Content-Type": "application/timestamp-query" },
                 body: tsQuery.stdout
             });
-
-            if (!response.ok) throw new Error(`TSA Server returned ${response.status}`);
             const tsrBuffer = Buffer.from(await response.arrayBuffer());
 
-            // 4️⃣ Inject Timestamp Attribute
+            // 3️⃣ Inject PAdES Attributes & Timestamp
             const cmsBuffer = fs.readFileSync(cmsPath);
-            const signedDataBuffer = this.injectTimestamp(cmsBuffer, tsrBuffer);
+            const signerCertBuffer = fs.readFileSync(certPath);
+            const signedDataBuffer = this.injectPadesAttributes(cmsBuffer, tsrBuffer, signerCertBuffer);
             
-            console.log(`✅ Signature Complete: ${signedDataBuffer.length} bytes`);
             return signedDataBuffer;
 
         } finally {
-            try {
-                fs.rmSync(tmpDir, { recursive: true, force: true });
-            } catch (e) { /* ignore cleanup errors */ }
+            fs.rmSync(tmpDir, { recursive: true, force: true });
         }
     }
 
-    injectTimestamp(cmsBuffer, tsrBuffer) {
-        // Safer conversion of Node Buffer to ArrayBuffer
+    injectPadesAttributes(cmsBuffer, tsrBuffer, certBuffer) {
         const cmsArrayBuffer = new Uint8Array(cmsBuffer).buffer;
         const tsrArrayBuffer = new Uint8Array(tsrBuffer).buffer;
-
+        
         const asn1 = asn1js.fromBER(cmsArrayBuffer);
         const contentInfo = new pkijs.ContentInfo({ schema: asn1.result });
         const signedData = new pkijs.SignedData({ schema: contentInfo.content });
+        const signer = signedData.signerInfos[0];
 
+        // --- A. ADD ESS-signing-certificate-v2 (PAdES Requirement) ---
+        // This stops the "signing-certificate attribute is absent" error
+        const certHash = crypto.createHash("sha256").update(certBuffer).digest();
+        const essSigningCertV2 = new pkijs.ESSSigningCertificateV2({
+            certs: [new pkijs.SigningCertificateV2Cert({
+                certHash: new asn1js.OctetString({ valueHex: certHash })
+            })]
+        });
+
+        signer.signedAttributes = signer.signedAttributes || new pkijs.SignedAndUnsignedAttributes({ type: 0, attributes: [] });
+        signer.signedAttributes.attributes.push(new pkijs.Attribute({
+            type: "1.2.840.113549.1.9.16.2.47", // id-aa-signingCertificateV2
+            values: [essSigningCertV2.toSchema()]
+        }));
+
+        // --- B. ADD Timestamp (T-Level) ---
         const tsrAsn1 = asn1js.fromBER(tsrArrayBuffer);
         const tsrInfo = new pkijs.TimeStampResp({ schema: tsrAsn1.result });
-
-        if (!tsrInfo.timeStampToken) throw new Error("Missing TimeStampToken");
-
-        const signer = signedData.signerInfos[0];
         
-        if (!signer.unsignedAttributes) {
-            signer.unsignedAttributes = new pkijs.SignedAndUnsignedAttributes({ type: 1, attributes: [] });
-        }
-
-        // Add the timestamp token (OID 1.2.840.113549.1.9.16.2.14)
+        signer.unsignedAttributes = signer.unsignedAttributes || new pkijs.SignedAndUnsignedAttributes({ type: 1, attributes: [] });
         signer.unsignedAttributes.attributes.push(new pkijs.Attribute({
             type: "1.2.840.113549.1.9.16.2.14",
             values: [tsrInfo.timeStampToken.toSchema()]
@@ -116,24 +111,15 @@ class ExternalSigner extends Signer {
             content: signedData.toSchema()
         });
 
-        // Use false for Indefinite Length Encoding - often more compatible with PDF injectors
         return Buffer.from(finalContentInfo.toSchema().toBER(false));
     }
 }
 
 export async function signBuffer(pdfBuffer) {
-    if (process.env.NODE_ENV === "development") return pdfBuffer;
-    
-    // Reserve space
     const pdfWithPlaceholder = plainAddPlaceholder({
         pdfBuffer,
         reason: "TransferGuard Legal Seal",
         signatureLength: SIGNATURE_LENGTH,
     });
-
-    // Create instances explicitly as in your working 'old' code
-    const signPdf = new SignPdf();
-    const signerInstance = new ExternalSigner();
-
-    return await signPdf.sign(pdfWithPlaceholder, signerInstance);
+    return await new SignPdf().sign(pdfWithPlaceholder, new ExternalSigner());
 }
