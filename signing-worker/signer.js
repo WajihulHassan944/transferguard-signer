@@ -73,9 +73,9 @@ class ExternalSigner extends Signer {
     }
 
     injectPadesAttributes(cmsBuffer, tsrBuffer, certBuffer) {
-        // Safer conversion of Node Buffer to ArrayBuffer
-        const cmsArrayBuffer = cmsBuffer.buffer.slice(cmsBuffer.byteOffset, cmsBuffer.byteOffset + cmsBuffer.byteLength);
-        const tsrArrayBuffer = tsrBuffer.buffer.slice(tsrBuffer.byteOffset, tsrBuffer.byteOffset + tsrBuffer.byteLength);
+        // 1. Prepare Buffers
+        const cmsArrayBuffer = new Uint8Array(cmsBuffer).buffer;
+        const tsrArrayBuffer = new Uint8Array(tsrBuffer).buffer;
         
         const asn1 = asn1js.fromBER(cmsArrayBuffer);
         const contentInfo = new pkijs.ContentInfo({ schema: asn1.result });
@@ -83,26 +83,44 @@ class ExternalSigner extends Signer {
         const signer = signedData.signerInfos[0];
 
         // --- A. ADD ESS-signing-certificate-v2 (PAdES Requirement) ---
-        // FIX: Using ESSCertIDv2 (the correct class name for modern pkijs)
         const certHash = crypto.createHash("sha256").update(certBuffer).digest();
-        const essSigningCertV2 = new pkijs.ESSSigningCertificateV2({
-            certs: [new pkijs.ESSCertIDv2({
-                hashAlgorithm: new pkijs.AlgorithmIdentifier({
-                    algorithmId: "2.16.840.1.101.3.4.2.1" // OID for SHA-256
-                }),
-                certHash: new asn1js.OctetString({ valueHex: certHash })
-            })]
+
+        /**
+         * MANUAL ASN.1 CONSTRUCTION for ESSSigningCertificateV2
+         * This bypasses the "pkijs.ESSCertIDv2 is not a constructor" error
+         * Structure: SEQUENCE { certs SEQUENCE OF ESSCertIDv2 }
+         */
+        const essSigningCertV2Schema = new asn1js.Sequence({
+            value: [
+                new asn1js.Sequence({ // certs
+                    value: [
+                        new asn1js.Sequence({ // ESSCertIDv2
+                            value: [
+                                new asn1js.Sequence({ // hashAlgorithm (Optional, defaults to SHA-256)
+                                    value: [
+                                        new asn1js.ObjectIdentifier({ value: "2.16.840.1.101.3.4.2.1" }) 
+                                    ]
+                                }),
+                                new asn1js.OctetString({ valueHex: certHash })
+                            ]
+                        })
+                    ]
+                })
+            ]
         });
 
         // Ensure signedAttributes exists
         if (!signer.signedAttributes) {
-            signer.signedAttributes = new pkijs.SignedAndUnsignedAttributes({ type: 0, attributes: [] });
+            signer.signedAttributes = new pkijs.SignedAndUnsignedAttributes({ 
+                type: 0, 
+                attributes: [] 
+            });
         }
 
-        // Add the signing certificate attribute (OID: 1.2.840.113549.1.9.16.2.47)
+        // Add the attribute (OID: 1.2.840.113549.1.9.16.2.47)
         signer.signedAttributes.attributes.push(new pkijs.Attribute({
             type: "1.2.840.113549.1.9.16.2.47", 
-            values: [essSigningCertV2.toSchema()]
+            values: [essSigningCertV2Schema]
         }));
 
         // --- B. ADD Timestamp (T-Level) ---
@@ -110,7 +128,10 @@ class ExternalSigner extends Signer {
         const tsrInfo = new pkijs.TimeStampResp({ schema: tsrAsn1.result });
         
         if (!signer.unsignedAttributes) {
-            signer.unsignedAttributes = new pkijs.SignedAndUnsignedAttributes({ type: 1, attributes: [] });
+            signer.unsignedAttributes = new pkijs.SignedAndUnsignedAttributes({ 
+                type: 1, 
+                attributes: [] 
+            });
         }
 
         signer.unsignedAttributes.attributes.push(new pkijs.Attribute({
@@ -123,6 +144,7 @@ class ExternalSigner extends Signer {
             content: signedData.toSchema()
         });
 
+        // Use Indefinite length encoding (false) for maximum compatibility
         return Buffer.from(finalContentInfo.toSchema().toBER(false));
     }
 }
