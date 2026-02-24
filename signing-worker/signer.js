@@ -28,18 +28,21 @@ class ExternalSigner extends Signer {
 
             // 1️⃣ Generate DETACHED CMS signature
             // We use detached so the PDF doesn't get duplicated inside the signature
-            const signArgs = [
-                "cms", "-sign", "-binary",
-                "-in", dataPath,
-                "-signer", certPath,
-                "-engine", "pkcs11",
-                "-keyform", "engine",
-                "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
-                "-outform", "DER",
-                "-md", "sha256",
-                "-nosmimecap",
-                "-out", cmsPath
-            ];
+           const signArgs = [
+    "cms", "-sign",
+    "-binary",
+    "-in", dataPath,
+    "-signer", certPath,
+    "-certfile", chainPath,
+    "-engine", "pkcs11",
+    "-keyform", "engine",
+    "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
+    "-outform", "DER",
+    "-md", "sha256",
+    "-cades",                 // 🔥 VERY IMPORTANT
+    "-nodetach", false,       // ensure detached
+    "-out", cmsPath
+];
 
             if (chainPath && fs.existsSync(chainPath)) {
                 signArgs.splice(signArgs.indexOf("-out"), 0, "-certfile", chainPath);

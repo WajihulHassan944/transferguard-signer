@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>{{AUDIT_ID}}</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+
+/* ================= GLOBAL ================= */
+
+html, body {
+  width: 100%;
+}
+
+body {
+  font-family: "Inter", Arial, Helvetica, sans-serif;
+  font-size: 13.5px;
+  color: #111;
+  margin: 0;
+  padding: 0;
+  line-height: 1.55;
+}
+
+/* ================= HEADER ================= */
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 28px;
+  break-inside: avoid;
+}
+
+.logo {
+  width: 180px;
+}
+
+.header-title {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: left;
+}
+
+/* ================= INTRO ================= */
+
+.intro {
+  font-size: 13px;
+  margin-top: 14px;
+  margin-bottom: 40px;
+}
+
+/* ================= SECTION HEADERS ================= */
+
+h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 38px 0 18px;
+  background-color: #d9d9d9;
+  padding: 6px 10px;
+
+  /* Prevent bad page breaks */
+  break-after: avoid-page;
+  page-break-after: avoid;
+}
+
+/* ================= ROWS ================= */
+
+.row {
+  display: flex;
+  margin: 10px 0;
+
+  /* Prevent row splitting */
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.label {
+  width: 240px;
+  font-weight: 600;
+}
+
+.value {
+  flex: 1;
+  word-break: break-word;
+}
+
+.mono {
+  font-family: "Courier New", Courier, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ================= SIGNATURE ================= */
+
+.signature-box {
+  margin-top: 14px;
+  width: 55%;
+  border: 2px solid #222;
+  height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.signature-box img {
+  max-height: 85px;
+  max-width: 90%;
+}
+
+/* ================= WATERMARK ================= */
+
+body::before {
+  content: "";
+  position: fixed;
+  top: 45%;
+  left: 50%;
+  width: 340px;
+  height: 340px;
+  background-image: url('https://transferguard.eu/assets/logo-only.png');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  opacity: 0.10;
+  transform: translate(-50%, -50%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+</style>
+</head>
+
+<body>
+
+  <!-- HEADER -->
+  <div class="header">
+    <img class="logo" src="https://transferguard.eu/assets/transferguard-logo-new.png" />
+    <div class="header-title">
+      CERTIFICATE OF EVIDENCE Verified Identity -<br />
+      Court Admissible Audit Trail
+    </div>
+  </div>
+
+  <div class="intro">
+    This "Certificate of Evidence" is generated following a successful biometric identity verification and explicit digital signature.
+    The document is cryptographically sealed via the TransferGuard Legal Engine (PDF Signing) to ensure court-admissibility.
+  </div>
+
+  <!-- SECTION 0 -->
+  <h2>0. Sender Information</h2>
+
+  <div class="row"><div class="label">Organization:</div><div class="value">{{SENDER_ORG}}</div></div>
+  <div class="row"><div class="label">Sender name:</div><div class="value">{{SENDER_NAME}}</div></div>
+  <div class="row"><div class="label">Sender email:</div><div class="value">{{SENDER_EMAIL}}</div></div>
+  <div class="row"><div class="label">Date sent:</div><div class="value">{{DATE_SENT}}</div></div>
+
+  <!-- SECTION 1 -->
+  <h2>1. Transfer Summary</h2>
+
+  <div class="row"><div class="label">File Name:</div><div class="value">{{FILE_NAME}}</div></div>
+  <div class="row"><div class="label">SHA-256 Hash:</div><div class="value mono">{{SHA256}}</div></div>
+  <div class="row"><div class="label">File Size:</div><div class="value">{{FILE_SIZE}}</div></div>
+  <div class="row"><div class="label">Transfer Status:</div><div class="value">{{TRANSFER_STATUS}}</div></div>
+
+  <!-- SECTION 2 -->
+  <h2>2. Recipient Identity Verification (Veriff IDV)</h2>
+
+  <div class="row"><div class="label">Full Name (ID):</div><div class="value">{{RECIPIENT_NAME}}</div></div>
+  <div class="row"><div class="label">ID Document Type:</div><div class="value">{{ID_TYPE}}</div></div>
+  <div class="row"><div class="label">Document Number:</div><div class="value">{{ID_NUMBER}}</div></div>
+  <div class="row"><div class="label">Biometric Match:</div><div class="value">{{BIOMETRIC}}</div></div>
+  <div class="row"><div class="label">Veriff Session ID:</div><div class="value">{{VERIFF_SESSION}}</div></div>
+  <div class="row"><div class="label">Timestamp IDV:</div><div class="value">{{IDV_TIME}}</div></div>
+
+  <!-- SECTION 3 -->
+  <h2>3. Recipient Digital Signature</h2>
+
+  <p style="margin-top:8px;">
+    "I hereby acknowledge the receipt of the files mentioned in Section 1 in good order."
+  </p>
+
+  <div class="signature-box">
+    <img src="{{SIGNATURE_URL}}" onerror="this.style.display='none'" />
+  </div>
+
+  <div style="margin-top:10px;">
+    Signature name: {{RECIPIENT_NAME}}<br />
+    Date: {{SIGN_DATE}}
+  </div>
+
+  <!-- SECTION 4 -->
+  <h2>4. Technical Audit Log</h2>
+
+  <div class="row"><div class="label">IP Address:</div><div class="value">{{IP}}</div></div>
+  <div class="row"><div class="label">Location:</div><div class="value">{{LOCATION}}</div></div>
+  <div class="row"><div class="label">Device / OS:</div><div class="value">{{DEVICE}}</div></div>
+  <div class="row"><div class="label">Browser:</div><div class="value">{{BROWSER}}</div></div>
+
+  <!-- SECTION 5 -->
+  <h2>5. Legal Compliance & Security</h2>
+
+  <div class="row"><div class="label">TSA Time-Stamp:</div><div class="value">Qualified Sectigo TSA - eIDAS Compliant</div></div>
+  <div class="row"><div class="label">Encryption:</div><div class="value">AES-256 End-to-End Encryption</div></div>
+  <div class="row"><div class="label">Terms Version:</div><div class="value">v1.4 (Active)</div></div>
+  <div class="row"><div class="label">Privacy Version:</div><div class="value">v1.2 (Active)</div></div>
+
+</body>
+</html>

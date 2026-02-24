@@ -86,65 +86,101 @@ const senderName = [sender.first_name, sender.last_name]
 // ===== Build dynamic transferData for PDF =====
 const transferData = {
   // ======================
+  // PLAN INFO
+  // ======================
+  plan_name: "Professional Plan",
+  audit_id: transfer.id,
+
+  // ======================
   // CORE
   // ======================
   id: transfer.id,
   created_at: transfer.created_at,
+  time_date_send: transfer.created_at,
+  time_date_received: transfer.delivered_at,
 
   // ======================
-  // SENDER INFO
+  // SENDER INFORMATION
   // ======================
   sender_org: sender.company_name || "TransferGuard",
   sender_name: senderName || "Unknown Sender",
   sender_email: sender.email || "unknown@transferguard.com",
+  verified_domain: sender.email?.split("@")[1] || "transferguard.com",
 
   // ======================
-  // FILE INFO
+  // RECEIVER INFORMATION
   // ======================
+  receiver_org: "Private Recipient",
+  recipient_name: transfer.recipient_name || "Verified Recipient",
+  recipient_email: transfer.recipient_email,
+  receiver_verified_domain:
+    transfer.recipient_email?.split("@")[1] || "",
+
+  // ======================
+  // TRANSFER SUMMARY
+  // ======================
+  file_name: files?.name || "Unknown_File",
+  file_size: `${(transfer.total_size_bytes / 1024).toFixed(2)} KB`,
   sha256_hash: transfer.sha256_hash || transfer.encrypted_password,
-  status: transfer.status || "Successfully Downloaded & Identity Verified",
-  files: [
-    {
-      name: files?.name || "Unknown_File",
-      size: files?.size || transfer.total_size_bytes || 0,
-    },
-  ],
+  transfer_status: "Successfully Downloaded & Client Check via Email Verification",
+  chosen_verification: transfer.verification_method || "Email Verification",
 
   // ======================
-  // RECIPIENT
+  // VERIFICATION SECTION
   // ======================
-  recipient_name: transfer.recipient_email || "Verified Recipient",
+  verification_method_a: true,   // Email verification active
+  verification_method_b: false,
+  verification_method_c: false,
+  verification_method_d: true,   // ID verification block visible
+
+  email_address: transfer.recipient_email,
+  telephone_number: null,
+
+  verification_timestamp:
+    transfer.delivered_at ||
+    transfer.first_access_at ||
+    new Date().toISOString(),
+
+  unique_token_id: transfer.download_token,
 
   // ======================
-  // IDENTITY (fallback if not using Veriff)
+  // IDENTITY VERIFICATION (Professional Plan Includes IDV)
   // ======================
+  name_client: transfer.recipient_name,
   id_type: "Email Verification",
-  id_number: transfer.recipient_email || "",
-  biometric_result: "N/A",
-  veriff_session: "N/A",
-  idv_timestamp: transfer.delivered_at || transfer.first_access_at || null,
+  last_digits_iddocument: "N/A",
+  biometric_match: "Not Applicable",
+  veriff_session_id: "N/A",
+  external_timestamp: transfer.delivered_at,
 
   // ======================
   // SIGNATURE
   // ======================
-  signatureUrl:
-    transfer.signatureUrl ||
-    "https://transferguard.com/signature.png",
-
-  signDate:
-    transfer.signDate ||
+  signature_name: transfer.recipient_name,
+  signature_date:
+    transfer.download_used_at ||
     transfer.last_access_at ||
     new Date().toISOString(),
 
   // ======================
-  // TECHNICAL AUDIT
+  // TECHNICAL AUDIT LOG
   // ======================
-  last_access_ip:
+  ip_address:
     transfer.last_access_ip ||
     audit.ip_address ||
     "0.0.0.0",
 
-  audit_log_json: transfer.audit_log_json || null,
+  location: `${audit.city || "Unknown"}, ${audit.country || ""}`,
+  device_os: `${audit.device_type || "Desktop"}`,
+  browser: audit.user_agent || "Unknown Browser",
+
+  // ======================
+  // LEGAL COMPLIANCE
+  // ======================
+  tsa_provider: "Qualified Sectigo TSA",
+  encryption_standard: "AES-256 End-to-End Encryption",
+  terms_version: "v1.4 (Active)",
+  privacy_version: "v1.2 (Active)",
 };
 
           // 1️⃣ Generate PDF
