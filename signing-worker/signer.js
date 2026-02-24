@@ -7,162 +7,133 @@ import os from "os";
 import path from "path";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
-import * as crypto from "crypto";
 
 const SIGNATURE_LENGTH = 35000;
 
-// Helper to convert PEM to ArrayBuffer/DER
-function pemToDer(pemBuffer) {
-    const pemString = pemBuffer.toString();
-    const base64 = pemString
-        .replace(/-----BEGIN CERTIFICATE-----/g, "")
-        .replace(/-----END CERTIFICATE-----/g, "")
-        .replace(/\s+/g, "");
-    return Buffer.from(base64, "base64");
-}
-
 class ExternalSigner extends Signer {
     async sign(bufferToSign) {
-        console.log("🚀 Starting PAdES-B-T signing...");
+        console.log("🚀 Starting PAdES-compliant signing...");
 
-        // 1. Read and convert certs to DER
-        const certPem = fs.readFileSync(process.env.CERT_FILE);
-        const certDer = pemToDer(certPem);
-        
-        // Handle Chain if it exists
-        let chainDer = null;
-        if (process.env.INTERMEDIATE_CERT && fs.existsSync(process.env.INTERMEDIATE_CERT)) {
-            chainDer = pemToDer(fs.readFileSync(process.env.INTERMEDIATE_CERT));
-        }
+        const certPath = process.env.CERT_FILE;
+        const chainPath = process.env.INTERMEDIATE_CERT;
 
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sign-"));
-        const digestPath = path.join(tmpDir, "digest.bin");
-        const sigPath = path.join(tmpDir, "raw.sig");
+        const dataPath = path.join(tmpDir, "data.bin");
+        const cmsPath = path.join(tmpDir, "sig.der");
+
+        fs.writeFileSync(dataPath, bufferToSign);
 
         try {
             const openssl = process.env.OPENSSL_BIN || "/opt/homebrew/opt/openssl@3/bin/openssl";
 
-            // Hash the data manually for pkeyutl
-            const digest = crypto.createHash("sha256").update(bufferToSign).digest();
-            fs.writeFileSync(digestPath, digest);
-
-            // 2. Sign the digest via Hardware Token
+            // 1️⃣ Generate DETACHED CMS signature
+            // We use detached so the PDF doesn't get duplicated inside the signature
             const signArgs = [
-                "pkeyutl", "-sign",
+                "cms", "-sign", "-binary",
+                "-in", dataPath,
+                "-signer", certPath,
                 "-engine", "pkcs11",
                 "-keyform", "engine",
                 "-inkey", `pkcs11:token=${process.env.PKCS11_TOKEN_LABEL};type=private;pin-value=${process.env.PKCS11_PIN}`,
-                "-in", digestPath,
-                "-out", sigPath,
-                "-pkeyopt", "digest:sha256"
+                "-outform", "DER",
+                "-md", "sha256",
+                "-nosmimecap",
+                "-out", cmsPath
             ];
+
+            if (chainPath && fs.existsSync(chainPath)) {
+                signArgs.splice(signArgs.indexOf("-out"), 0, "-certfile", chainPath);
+            }
 
             const sign = spawnSync(openssl, signArgs, {
                 env: { ...process.env, PKCS11_MODULE_PATH: process.env.PKCS11_MODULE }
             });
 
-            if (sign.status !== 0) throw new Error(`OpenSSL Sign Failed: ${sign.stderr.toString()}`);
-            const rawSignature = fs.readFileSync(sigPath);
+            if (sign.status !== 0) {
+                throw new Error(`OpenSSL Error: ${sign.stderr?.toString()}`);
+            }
 
-            // 3. Request Timestamp over the Signature
-            const tsQuery = spawnSync(openssl, ["ts", "-query", "-digest", crypto.createHash("sha256").update(rawSignature).digest('hex'), "-sha256", "-cert"], { encoding: null });
-            const tsResponse = await fetch(process.env.TSA_URL || "http://timestamp.sectigo.com", {
+            // 2️⃣ Generate Timestamp Query
+            console.log("⏳ Requesting RFC3161 timestamp...");
+            const tsQuery = spawnSync(openssl, [
+                "ts", "-query", "-data", cmsPath, "-sha256", "-cert"
+            ], { encoding: null });
+
+            if (tsQuery.status !== 0) throw new Error("TS Query failed");
+
+            // 3️⃣ Fetch Timestamp (using fetch for stability)
+            const response = await fetch(process.env.TSA_URL || "http://timestamp.sectigo.com", {
                 method: "POST",
                 headers: { "Content-Type": "application/timestamp-query" },
                 body: tsQuery.stdout
             });
-            const tsrBuffer = Buffer.from(await tsResponse.arrayBuffer());
 
-            // 4. Build the PAdES Container
-            return this.buildPadesContainer(bufferToSign, certDer, chainDer, rawSignature, tsrBuffer);
+            if (!response.ok) throw new Error(`TSA Server returned ${response.status}`);
+            const tsrBuffer = Buffer.from(await response.arrayBuffer());
+
+            // 4️⃣ Inject Timestamp Attribute
+            const cmsBuffer = fs.readFileSync(cmsPath);
+            const signedDataBuffer = this.injectTimestamp(cmsBuffer, tsrBuffer);
+            
+            console.log(`✅ Signature Complete: ${signedDataBuffer.length} bytes`);
+            return signedDataBuffer;
 
         } finally {
-            fs.rmSync(tmpDir, { recursive: true, force: true });
+            try {
+                fs.rmSync(tmpDir, { recursive: true, force: true });
+            } catch (e) { /* ignore cleanup errors */ }
         }
     }
 
-    buildPadesContainer(data, certDer, chainDer, rawSignature, tsrBuffer) {
-        // Convert Node Buffers to ArrayBuffers for pkijs
-        const certArrayBuffer = new Uint8Array(certDer).buffer;
-        const sigArrayBuffer = new Uint8Array(rawSignature).buffer;
+    injectTimestamp(cmsBuffer, tsrBuffer) {
+        // Safer conversion of Node Buffer to ArrayBuffer
+        const cmsArrayBuffer = new Uint8Array(cmsBuffer).buffer;
         const tsrArrayBuffer = new Uint8Array(tsrBuffer).buffer;
 
-        const certificate = pkijs.Certificate.fromBER(certArrayBuffer);
+        const asn1 = asn1js.fromBER(cmsArrayBuffer);
+        const contentInfo = new pkijs.ContentInfo({ schema: asn1.result });
+        const signedData = new pkijs.SignedData({ schema: contentInfo.content });
 
-        const signedData = new pkijs.SignedData({
-            version: 1,
-            encapContentInfo: new pkijs.EncapsulatedContentInfo({
-                eContentType: "1.2.840.113549.1.7.1" // data
-            }),
-            signerInfos: [
-                new pkijs.SignerInfo({
-                    version: 1,
-                    sid: new pkijs.IssuerAndSerialNumber({
-                        issuer: certificate.issuer,
-                        serialNumber: certificate.serialNumber
-                    }),
-                    digestAlgorithm: new pkijs.AlgorithmIdentifier({ algorithmId: "2.16.840.1.101.3.4.2.1" }),
-                    signatureAlgorithm: new pkijs.AlgorithmIdentifier({ algorithmId: "1.2.840.113549.1.1.11" }), // sha256WithRSAEncryption
-                    signature: new asn1js.OctetString({ valueHex: sigArrayBuffer })
-                })
-            ],
-            certificates: [certificate]
-        });
-
-        // Add chain certificate if present
-        if (chainDer) {
-            signedData.certificates.push(pkijs.Certificate.fromBER(new Uint8Array(chainDer).buffer));
-        }
-
-        const signer = signedData.signerInfos[0];
-        const certHash = crypto.createHash("sha256").update(certDer).digest();
-
-        // PAdES signing-certificate-v2 attribute
-        const essSigningCertV2 = new asn1js.Sequence({
-            value: [new asn1js.Sequence({
-                value: [new asn1js.Sequence({
-                    value: [
-                        new asn1js.Sequence({ value: [new asn1js.ObjectIdentifier({ value: "2.16.840.1.101.3.4.2.1" })] }),
-                        new asn1js.OctetString({ valueHex: certHash })
-                    ]
-                })]
-            })]
-        });
-
-        signer.signedAttributes = new pkijs.SignedAndUnsignedAttributes({
-            type: 0,
-            attributes: [
-                new pkijs.Attribute({ type: "1.2.840.113549.1.9.3", values: [new asn1js.ObjectIdentifier({ value: "1.2.840.113549.1.7.1" })] }),
-                new pkijs.Attribute({ type: "1.2.840.113549.1.9.5", values: [new asn1js.UTCTime({ valueDate: new Date() })] }),
-                new pkijs.Attribute({ type: "1.2.840.113549.1.9.4", values: [new asn1js.OctetString({ valueHex: crypto.createHash("sha256").update(data).digest() })] }),
-                new pkijs.Attribute({ type: "1.2.840.113549.1.9.16.2.47", values: [essSigningCertV2] })
-            ]
-        });
-
-        // Timestamp
         const tsrAsn1 = asn1js.fromBER(tsrArrayBuffer);
         const tsrInfo = new pkijs.TimeStampResp({ schema: tsrAsn1.result });
-        signer.unsignedAttributes = new pkijs.SignedAndUnsignedAttributes({
-            type: 1,
-            attributes: [
-                new pkijs.Attribute({ type: "1.2.840.113549.1.9.16.2.14", values: [tsrInfo.timeStampToken.toSchema()] })
-            ]
-        });
 
-        const contentInfo = new pkijs.ContentInfo({
+        if (!tsrInfo.timeStampToken) throw new Error("Missing TimeStampToken");
+
+        const signer = signedData.signerInfos[0];
+        
+        if (!signer.unsignedAttributes) {
+            signer.unsignedAttributes = new pkijs.SignedAndUnsignedAttributes({ type: 1, attributes: [] });
+        }
+
+        // Add the timestamp token (OID 1.2.840.113549.1.9.16.2.14)
+        signer.unsignedAttributes.attributes.push(new pkijs.Attribute({
+            type: "1.2.840.113549.1.9.16.2.14",
+            values: [tsrInfo.timeStampToken.toSchema()]
+        }));
+
+        const finalContentInfo = new pkijs.ContentInfo({
             contentType: "1.2.840.113549.1.7.2",
-            content: signedData.toSchema(true)
+            content: signedData.toSchema()
         });
 
-        return Buffer.from(contentInfo.toSchema().toBER(false));
+        // Use false for Indefinite Length Encoding - often more compatible with PDF injectors
+        return Buffer.from(finalContentInfo.toSchema().toBER(false));
     }
 }
 
 export async function signBuffer(pdfBuffer) {
+    if (process.env.NODE_ENV === "development") return pdfBuffer;
+    
+    // Reserve space
     const pdfWithPlaceholder = plainAddPlaceholder({
         pdfBuffer,
         reason: "TransferGuard Legal Seal",
         signatureLength: SIGNATURE_LENGTH,
     });
-    return await new SignPdf().sign(pdfWithPlaceholder, new ExternalSigner());
+
+    // Create instances explicitly as in your working 'old' code
+    const signPdf = new SignPdf();
+    const signerInstance = new ExternalSigner();
+
+    return await signPdf.sign(pdfWithPlaceholder, signerInstance);
 }
