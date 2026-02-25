@@ -149,7 +149,7 @@ const transferData = {
   // VERIFICATION DETAILS
   // ======================
   email_address: transfer.recipient_email,
-  telephone_number: null, // set later if you store it
+  telephone_number: transfer.recipient_phone, // set later if you store it
 
   unique_token_id: transfer.download_token,
 
