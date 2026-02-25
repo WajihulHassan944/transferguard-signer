@@ -8,8 +8,6 @@
 
 <style>
 
-/* ================= GLOBAL ================= */
-
 html, body { width: 100%; }
 
 body {
@@ -20,9 +18,10 @@ body {
   padding: 0;
   line-height: 1.55;
 }
-
-/* ================= HEADER ================= */
-
+.lastrow{
+  color:black;
+  margin-bottom: 15px;
+}
 .header {
   display: flex;
   justify-content: space-between;
@@ -39,15 +38,11 @@ body {
   line-height: 1.4;
 }
 
-/* ================= INTRO ================= */
-
 .intro {
   font-size: 13px;
   margin-top: 14px;
   margin-bottom: 40px;
 }
-
-/* ================= SECTION HEADERS ================= */
 
 h2 {
   font-size: 18px;
@@ -57,8 +52,6 @@ h2 {
   padding: 6px 10px;
   break-after: avoid-page;
 }
-
-/* ================= ROWS ================= */
 
 .row {
   display: flex;
@@ -82,8 +75,6 @@ h2 {
   word-break: break-all;
 }
 
-/* ================= SIGNATURE ================= */
-
 .signature-box {
   margin-top: 14px;
   width: 55%;
@@ -92,14 +83,13 @@ h2 {
   display: flex;
   align-items: center;
   justify-content: center;
+  background:#fff;
 }
 
 .signature-box img {
   max-height: 85px;
   max-width: 90%;
 }
-
-/* ================= WATERMARK ================= */
 
 body::before {
   content: "";
@@ -133,8 +123,8 @@ body::before {
 </div>
 
 <div class="intro">
-  This "Certificate of Evidence" is generated following a successful biometric identity verification and explicit digital signature.
-  The document is cryptographically sealed via the TransferGuard Legal Engine (PDF Signing) to ensure court-admissibility.
+  This Certificate of Evidence confirms that the recipient successfully accessed and verified the transfer.
+  The document is cryptographically sealed via the TransferGuard Legal Engine to ensure integrity and court admissibility.
 </div>
 
 <!-- 1. SENDER INFORMATION -->
@@ -158,52 +148,19 @@ body::before {
 <div class="row"><div class="label">File Name:</div><div class="value">{{FiLE_NAME}}</div></div>
 <div class="row"><div class="label">SHA-256 Hash:</div><div class="value mono">{{HASH}}</div></div>
 <div class="row"><div class="label">File Size:</div><div class="value">{{FILE_SIZE}}</div></div>
-<div class="row"><div class="label">Transfer Status:</div>
-  <div class="value">
-    Successfully Downloaded & client check via {{choosen_verification}}
-  </div>
+<div class="row">
+  <div class="label">Verification Method:</div>
+  <div class="value">{{choosen_verification}}</div>
 </div>
 
-<!-- 4. VERIFIED BY EMAIL (Professional Plan) -->
-<h2>4. Verified by Email</h2>
+<!-- 4. VERIFICATION MODULE (DYNAMIC) -->
+{{VERIFICATION_BLOCK}}
 
-<div class="row"><div class="label">E-mail verification:</div><div class="value">{{email adress}}</div></div>
-<div class="row"><div class="label">Verification Timestamp:</div><div class="value">{{verification timestamp}}</div></div>
-<div class="row"><div class="label">Unique Token ID:</div><div class="value mono">{{Uniqie Token ID}}</div></div>
 
-<p style="margin-top:10px;">
-Recipient identity was confirmed via a unique One-Time Password (OTP) sent to the registered email address.
-</p>
 
-<!-- ========================================================= -->
-<!-- COMMENTED OUT - OTHER PLAN TYPES (NOT REMOVED) -->
-<!-- ========================================================= -->
+{{LEGAL_ACTION_BLOCK}}
 
-<!--
-<h2>Verified by SMS</h2>
-Recipient identity was confirmed via OTP sent via SMS.
-
-<h2>Multifactor Authentication</h2>
-OTP required via email and SMS.
-
-<h2>Recipient ID Verification (Enterprise Plan)</h2>
-Full Name (ID): {{name_client}}
-ID Document Type: {{ID_type}}
-Document Number: {{last_digits_iddocument}}
-Biometric Match: {{pass/fail}}
-Veriff Session ID: {{Veriff_session_ID}}
-Timestamp IDV: {{external_timestamp}}
--->
-
-<!-- 5. Electronic Consent & Receipt -->
-<h2>5. Electronic Consent & Receipt Acknowledgment</h2>
-
-<p>
-The recipient has electronically acknowledged receipt of the files and accepted the Terms of Service via a secure one-click agreement.
-This action was captured within a verified session and is cryptographically linked to the audit log.
-</p>
-
-<!-- 6. Technical Audit Log -->
+<!-- 6. TECHNICAL AUDIT LOG -->
 <h2>6. Technical Audit Log</h2>
 
 <div class="row"><div class="label">IP Address:</div><div class="value">{{IP_ADDRESS}}</div></div>
@@ -211,13 +168,17 @@ This action was captured within a verified session and is cryptographically link
 <div class="row"><div class="label">Device / OS:</div><div class="value">{{DEVICE_OS}}</div></div>
 <div class="row"><div class="label">Browser:</div><div class="value">{{BROWSER}}</div></div>
 
-<!-- 7. Legal Compliance & Security -->
+<!-- 7. LEGAL COMPLIANCE & SECURITY -->
 <h2>7. Legal Compliance & Security</h2>
 
 <div class="row"><div class="label">TSA Time-Stamp:</div><div class="value">{{TSA_PROVIDER}}</div></div>
-<div class="row"><div class="label">Encryption:</div><div class="value">{{ENCRYPTION_STANDARD}}</div></div>
+<div class="row"><div class="label">Encryption Standard:</div><div class="value">{{ENCRYPTION_STANDARD}}</div></div>
 <div class="row"><div class="label">Terms Version:</div><div class="value">{{TERMS_VERSION}}</div></div>
 <div class="row"><div class="label">Privacy Version:</div><div class="value">{{PRIVACY_VERSION}}</div></div>
 
+<p class="lastrow" style="margin-top: 20px;">Every Certificate of Evidence is cryptographically sealed by the TransferGuard Legal
+Engine using an X.509 digital certificate and an RFC 3161 compliant timestamp. This
+guarantees the immutability of your evidence and ensures the document is immediately
+admissible in legal proceedings (AdES level).</p>
 </body>
 </html>

@@ -88,7 +88,7 @@ const transferData = {
   // ======================
   // PLAN INFO
   // ======================
-  plan_name: "Professional Plan",
+  plan_name: transfer.security_level || "Standard",
   audit_id: transfer.id,
 
   // ======================
@@ -96,74 +96,87 @@ const transferData = {
   // ======================
   id: transfer.id,
   created_at: transfer.created_at,
-  time_date_send: transfer.created_at,
-  time_date_received: transfer.delivered_at,
-
-  // ======================
-  // SENDER INFORMATION
-  // ======================
-  sender_org: sender.company_name || "TransferGuard",
-  sender_name: senderName || "Unknown Sender",
-  sender_email: sender.email || "unknown@transferguard.com",
-  verified_domain: sender.email?.split("@")[1] || "transferguard.com",
-
-  // ======================
-  // RECEIVER INFORMATION
-  // ======================
-  receiver_org: "Private Recipient",
-  recipient_name: transfer.recipient_name || "Verified Recipient",
-  recipient_email: transfer.recipient_email,
-  receiver_verified_domain:
-    transfer.recipient_email?.split("@")[1] || "",
-
-  // ======================
-  // TRANSFER SUMMARY
-  // ======================
-  file_name: files?.name || "Unknown_File",
-  file_size_bytes: transfer.total_size_bytes,
-  sha256_hash: transfer.sha256_hash || transfer.encrypted_password,
-  transfer_status: "Successfully Downloaded & Client Check via Email Verification",
-  chosen_verification: transfer.verification_method || "Email Verification",
-
-  // ======================
-  // VERIFICATION SECTION
-  // ======================
-  verification_method_a: true,   // Email verification active
-  verification_method_b: false,
-  verification_method_c: false,
-  verification_method_d: true,   // ID verification block visible
-
-  email_address: transfer.recipient_email,
-  telephone_number: null,
+  signature_date:
+    transfer.download_used_at ||
+    transfer.last_access_at ||
+    transfer.delivered_at,
 
   verification_timestamp:
     transfer.delivered_at ||
-    transfer.first_access_at ||
-    new Date().toISOString(),
+    transfer.first_access_at,
+
+  // ======================
+  // AGREEMENT
+  // ======================
+  agreement_type: transfer.agreement_type, // one_click | signature
+  verification_method: transfer.verification_method, // email | sms | email_sms | id_verification
+
+  // ======================
+  // SENDER
+  // ======================
+  sender_org: sender.company_name || "TransferGuard",
+  sender_name: senderName || "Unknown Sender",
+  sender_email: sender.email || "",
+  verified_domain: sender.email?.split("@")[1] || "",
+
+  // ======================
+  // RECEIVER
+  // ======================
+  recipient_name: transfer.recipient_name,
+  recipient_email: transfer.recipient_email,
+
+  // ======================
+  // FILE
+  // ======================
+  file_name: files?.name || "Unknown_File",
+  file_size_bytes: transfer.total_size_bytes,
+  sha256_hash:
+    transfer.sha256_hash ||
+    transfer.encrypted_password ||
+    "Not Available",
+
+  // ======================
+  // TRANSFER STATUS
+  // ======================
+  transfer_status:
+    transfer.status === "signed"
+      ? "Digitally Signed & Certified"
+      : "Successfully Delivered & Verified",
+
+  chosen_verification: transfer.verification_method,
+
+  // ======================
+  // VERIFICATION DETAILS
+  // ======================
+  email_address: transfer.recipient_email,
+  telephone_number: null, // set later if you store it
 
   unique_token_id: transfer.download_token,
 
   // ======================
-  // IDENTITY VERIFICATION (Professional Plan Includes IDV)
+  // ID VERIFICATION (only used if id_verification)
   // ======================
-  name_client: transfer.recipient_name,
-  id_type: "Email Verification",
-  last_digits_iddocument: "N/A",
-  biometric_match: "Not Applicable",
-  veriff_session_id: "N/A",
+  id_type:
+    transfer.verification_method === "id_verification"
+      ? "Government Issued ID"
+      : null,
+
+  last_digits_iddocument: null,
+  biometric_match:
+    transfer.verification_method === "id_verification"
+      ? "Successful"
+      : null,
+
+  veriff_session_id: null,
   external_timestamp: transfer.delivered_at,
 
   // ======================
   // SIGNATURE
   // ======================
   signature_name: transfer.recipient_name,
-  signature_date:
-    transfer.download_used_at ||
-    transfer.last_access_at ||
-    new Date().toISOString(),
 
   // ======================
-  // TECHNICAL AUDIT LOG
+  // TECHNICAL AUDIT
   // ======================
   ip_address:
     transfer.last_access_ip ||
@@ -171,16 +184,19 @@ const transferData = {
     "0.0.0.0",
 
   location: `${audit.city || "Unknown"}, ${audit.country || ""}`,
-  device_os: `${audit.device_type || "Desktop"}`,
-  browser: audit.user_agent || "Unknown Browser",
+  browser: audit.user_agent || "",
 
   // ======================
-  // LEGAL COMPLIANCE
+  // LEGAL / COMPLIANCE
   // ======================
   tsa_provider: "Qualified Sectigo TSA",
-  encryption_standard: "AES-256 End-to-End Encryption",
-  terms_version: "v1.4 (Active)",
-  privacy_version: "v1.2 (Active)",
+  encryption_standard:
+    transfer.encrypted_password
+      ? "AES-256 End-to-End Encryption"
+      : "Standard TLS Encryption",
+
+  terms_version: "v1.4",
+  privacy_version: "v1.2",
 };
 
           // 1️⃣ Generate PDF

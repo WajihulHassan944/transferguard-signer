@@ -27,10 +27,10 @@ app.post("/sign", async (req, res) => {
     const pdfBuffer = await generatePDF(transferData);
 
     // 2️⃣ Hardware sign
-    const signedBuffer = await signBuffer(pdfBuffer);
+    // const signedBuffer = await signBuffer(pdfBuffer);
 
  res.setHeader("Content-Type", "application/pdf");
-    res.send(signedBuffer);
+    res.send(pdfBuffer);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Signing failed" });
