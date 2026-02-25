@@ -67,77 +67,126 @@ export async function generatePDF(data) {
   // VERIFICATION METHOD BLOCKS (MASTER ALIGNED)
   // ==================================================
 
-  let verificationBlock = "";
+let verificationBlock = "";
 
-  if (data.verification_method === "email") {
-    verificationBlock = `
-      <h2>Verified by Email</h2>
-     
-      <div class="row"><b>Email:</b> ${escape(data.recipient_email)}</div>
-      <div class="row"><b>Verification Timestamp:</b> ${formatDate(data.verification_timestamp)}</div>
-      <div class="row"><b>Unique Token ID:</b> ${escape(data.unique_token_id)}</div>
-       <p>
-        Recipient identity was confirmed via a unique One-Time Password (OTP) 
-        sent to the registered email address.
-      </p>
-    `;
-  }
+if (data.verification_method === "email") {
+  verificationBlock = `
+    <h2>4. Email Verification</h2>
 
-  if (data.verification_method === "sms") {
-    verificationBlock = `
-      <h2>Verified by SMS</h2>
-      
-      <div class="row"><b>Telephone Number:</b> ${escape(data.telephone_number)}</div>
-      <div class="row"><b>Verification Timestamp:</b> ${formatDate(data.verification_timestamp)}</div>
-      <div class="row"><b>Unique Token ID:</b> ${escape(data.unique_token_id)}</div>
+    <div class="row">
+      <div class="label">Verified Email:</div>
+      <div class="value">${escape(data.recipient_email)}</div>
+    </div>
 
-      <p>
-        Recipient identity was confirmed via a unique One-Time Password (OTP) 
-        sent to the registered telephone number via SMS.
-      </p>
-    `;
-  }
+    <div class="row">
+      <div class="label">Verification Timestamp:</div>
+      <div class="value">${formatDate(data.verification_timestamp)}</div>
+    </div>
 
-  if (data.verification_method === "email_sms") {
-    verificationBlock = `
-      <h2>Multi-Factor Authentication (MFA)</h2>
-      
-      <div class="row"><b>Email Verification:</b> ${escape(data.recipient_email)}</div>
-      <div class="row"><b>Verification Timestamp:</b> ${formatDate(data.verification_timestamp)}</div>
-      <div class="row"><b>Unique Token ID:</b> ${escape(data.unique_token_id)}</div>
+    <div class="row">
+      <div class="label">Unique Token ID:</div>
+      <div class="value mono">${escape(data.unique_token_id)}</div>
+    </div>
 
-      <div class="row"><b>Telephone Number:</b> ${escape(data.telephone_number)}</div>
-      <div class="row"><b>Verification Timestamp:</b> ${formatDate(data.verification_timestamp)}</div>
-      <div class="row"><b>Unique Token ID:</b> ${escape(data.unique_token_id)}</div>
+    <div class="intro">
+      Recipient identity was confirmed via a One-Time Password (OTP)
+      sent to the registered email address.
+    </div>
+  `;
+}
 
-      <p>
-        Recipient identity was confirmed via Multi-Factor Authentication (MFA), 
-        requiring independent validation through unique One-Time Passwords (OTP) 
-        sent to both the registered email address and telephone number (via SMS).
-      </p>
+if (data.verification_method === "sms") {
+  verificationBlock = `
+    <h2>4. SMS Verification</h2>
 
-    `;
-  }
+    <div class="row">
+      <div class="label">Telephone Number:</div>
+      <div class="value">${escape(data.telephone_number)}</div>
+    </div>
 
-  if (data.verification_method === "id_verification") {
-    verificationBlock = `
-      <h2>Recipient ID Verification</h2>
-     
+    <div class="row">
+      <div class="label">Verification Timestamp:</div>
+      <div class="value">${formatDate(data.verification_timestamp)}</div>
+    </div>
 
-      <div class="row"><b>Full Name (ID):</b> ${escape(data.recipient_name)}</div>
-      <div class="row"><b>ID Document Type:</b> ${escape(data.id_type)}</div>
-      <div class="row"><b>Document Number (Last 4 digits):</b> ${escape(data.last_digits_iddocument)}</div>
-      <div class="row"><b>Biometric Match:</b> ${escape(data.biometric_match)}</div>
-      <div class="row"><b>Veriff Session ID:</b> ${escape(data.veriff_session_id)}</div>
-      <div class="row"><b>Timestamp IDV:</b> ${formatDate(data.external_timestamp)}</div>
-       <p>
-        Identity was legally established through a high-assurance biometric facial scan 
-        and automated validation of a government-issued ID. A liveness check confirmed 
-        the recipient’s physical presence during authentication.
-      </p>
-    `;
-  }
+    <div class="row">
+      <div class="label">Unique Token ID:</div>
+      <div class="value mono">${escape(data.unique_token_id)}</div>
+    </div>
 
+    <div class="intro">
+      Recipient identity was confirmed via a One-Time Password (OTP)
+      sent to the registered telephone number via SMS.
+    </div>
+  `;
+}
+
+if (data.verification_method === "email_sms") {
+  verificationBlock = `
+    <h2>4. Multi-Factor Authentication (MFA)</h2>
+
+    <div class="row">
+      <div class="label">Email Address:</div>
+      <div class="value">${escape(data.recipient_email)}</div>
+    </div>
+
+    <div class="row">
+      <div class="label">Telephone Number:</div>
+      <div class="value">${escape(data.telephone_number)}</div>
+    </div>
+
+    <div class="row">
+      <div class="label">Verification Timestamp:</div>
+      <div class="value">${formatDate(data.verification_timestamp)}</div>
+    </div>
+
+    <div class="row">
+      <div class="label">Unique Token ID:</div>
+      <div class="value mono">${escape(data.unique_token_id)}</div>
+    </div>
+
+    <div class="intro">
+      Identity was confirmed through Multi-Factor Authentication (MFA),
+      requiring independent validation via OTP sent to both email and SMS.
+    </div>
+  `;
+}
+
+if (data.verification_method === "id_verification") {
+  verificationBlock = `
+    <h2>4. Recipient Identity Verification</h2>
+
+    <div class="row">
+      <div class="label">Full Name (ID):</div>
+      <div class="value">${escape(data.recipient_name)}</div>
+    </div>
+
+    <div class="row">
+      <div class="label">ID Document Type:</div>
+      <div class="value">${escape(data.id_type)}</div>
+    </div>
+
+    <div class="row">
+      <div class="label">Document Number (Last 4):</div>
+      <div class="value">${escape(data.last_digits_iddocument)}</div>
+    </div>
+
+    <div class="row">
+      <div class="label">Biometric Match:</div>
+      <div class="value">${escape(data.biometric_match)}</div>
+    </div>
+
+    <div class="row">
+      <div class="label">Verification Timestamp:</div>
+      <div class="value">${formatDate(data.external_timestamp)}</div>
+    </div>
+
+    <div class="intro">
+      Identity was established through biometric facial verification
+      and validation of a government-issued identification document.
+    </div>
+  `;
+}
   // ==================================================
   // LEGAL ACTION SECTION (e0 / e1 EXACT MATCH)
   // ==================================================
