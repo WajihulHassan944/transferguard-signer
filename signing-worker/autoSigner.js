@@ -161,7 +161,7 @@ const transferData = {
       ? "Government Issued ID"
       : null,
 
-  last_digits_iddocument: null,
+  last_digits_iddocument: "e4db",
   biometric_match:
     transfer.verification_method === "id_verification"
       ? "Successful"

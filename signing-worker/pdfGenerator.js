@@ -273,34 +273,80 @@ if (data.verification_method === "id_verification") {
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: "networkidle0" });
 
- const pdf = await page.pdf({
-    format: "A4",
-    printBackground: true,
-    displayHeaderFooter: true,
-    margin: {
-      top: "26mm",
-      bottom: "30mm",
-      left: "22mm",
-      right: "22mm",
-    },
-    headerTemplate: "<div></div>",
-    footerTemplate: `
-      <center><div style="font-family: 'Inter', Arial; font-size: 12px; width: 70%; text-align: center; color: #444; padding: 0 20px;">
-        <div style="margin-bottom: 4px;">
-          This "Certificate of Evidence" is generated following a successful biometric identity verification and explicit digital signature. 
-          The document is cryptographically sealed via the TransferGuard Legal Engine (PDF Signing) to ensure court-admissibility.
+  // --------------------------------------------------
+// Dynamic Footer Text (Professional Version)
+// --------------------------------------------------
+
+let verificationLabel = "";
+let actionLabel = "";
+
+switch (data.verification_method) {
+  case "email":
+    verificationLabel = "Email OTP Verification";
+    break;
+  case "sms":
+    verificationLabel = "SMS OTP Verification";
+    break;
+  case "email_sms":
+    verificationLabel = "Multi-Factor Authentication (Email + SMS OTP)";
+    break;
+  case "id_verification":
+    verificationLabel = "Biometric ID Verification";
+    break;
+  default:
+    verificationLabel = "Digital Verification";
+}
+
+switch (data.agreement_type) {
+  case "one_click":
+    actionLabel = "Secure One-Click Electronic Consent";
+    break;
+  case "signature":
+    actionLabel = "Digitally Captured Signature";
+    break;
+  default:
+    actionLabel = "Electronic Legal Acknowledgment";
+}
+
+const dynamicFooterIntro = `
+  This "Certificate of Evidence" confirms completion of ${verificationLabel}
+  and ${actionLabel}. The document is cryptographically sealed via the 
+  TransferGuard Legal Engine (PDF Signing) to ensure integrity and court-admissibility.
+`;
+
+const pdf = await page.pdf({
+  format: "A4",
+  printBackground: true,
+  displayHeaderFooter: true,
+  margin: {
+    top: "26mm",
+    bottom: "30mm",
+    left: "22mm",
+    right: "22mm",
+  },
+  headerTemplate: "<div></div>",
+  footerTemplate: `
+    <center>
+      <div style="font-family: 'Inter', Arial; font-size: 12px; width: 70%; text-align: center; color: #444; padding: 0 20px;">
+        
+        <div style="margin-bottom: 6px;">
+          ${dynamicFooterIntro}
         </div>
+
         <div style="margin-bottom: 4px;">
-         TransferGuard Professional Plan - Audit ID: ${escape(data.audit_id)} -  Page 
+          TransferGuard Professional Plan - Audit ID: ${escape(data.audit_id)} - Page 
           <span class="pageNumber"></span>
         </div>
+
         <div>
           TransferGuard is part of PVG Technologies BV, The Netherlands
         </div>
-      </div></center>
-    `,
-    preferCSSPageSize: false,
-  });
+
+      </div>
+    </center>
+  `,
+  preferCSSPageSize: false,
+});
 
 
   await browser.close();
