@@ -334,7 +334,7 @@ const pdf = await page.pdf({
         </div>
 
         <div style="margin-bottom: 4px;">
-          TransferGuard Professional Plan - Audit ID: ${escape(data.audit_id)} - Page 
+         TransferGuard ${escape(data.plan_name)} - Audit ID: ${escape(data.audit_id)} - Page 
           <span class="pageNumber"></span>
         </div>
 
