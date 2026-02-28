@@ -243,7 +243,7 @@ if (data.verification_method === "id_verification") {
     .replaceAll("{{recipient_email}}", escape(data.recipient_email))
 
     .replaceAll("{{name_organisation_receiver}}", escape(data.recipient_name))
-    .replaceAll("{{TIME_DATE_SEND}}", formatDate(data.signature_date))
+    .replaceAll("{{TIME_DATE_SEND}}", formatDate(data.verification_timestamp))
     .replaceAll("{{TIME_DATE_RECEIVED}}", formatDate(data.verification_timestamp))
 
     .replaceAll("{{FiLE_NAME}}", escape(data.file_name))
