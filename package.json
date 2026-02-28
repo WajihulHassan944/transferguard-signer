@@ -16,7 +16,6 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.991.0",
     "@aws-sdk/node-http-handler": "^3.374.0",
-    "@aws-sdk/s3-request-presigner": "^3.1000.0",
     "@libsql/client": "^0.17.0",
     "@signpdf/placeholder-pdf-lib": "^3.3.0",
     "@signpdf/placeholder-plain": "^3.3.0",
