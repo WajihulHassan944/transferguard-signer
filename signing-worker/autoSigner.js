@@ -3,6 +3,8 @@ import { generatePDF } from "./pdfGenerator.js";
 import { signBuffer } from "./signer.js";
 
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NodeHttpHandler } from "@aws-sdk/node-http-handler";
 import https from "https";
 import { db } from "../data/database.js";
@@ -82,6 +84,25 @@ const senderName = [sender.first_name, sender.last_name]
   .filter(Boolean)
   .join(" ");
 
+let signatureSignedUrl = null;
+
+if (transfer.digital_signature_url) {
+  try {
+    const key = transfer.digital_signature_url.split(`${BUCKET}/`)[1];
+
+    const command = new GetObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+    });
+
+    signatureSignedUrl = await getSignedUrl(s3, command, {
+      expiresIn: 60 * 10, // 10 minutes
+    });
+  } catch (err) {
+    console.error("❌ Failed to generate signed URL:", err);
+  }
+}
+
 
 // ===== Build dynamic transferData for PDF =====
 const transferData = {
@@ -148,9 +169,15 @@ const transferData = {
   // ======================
   // VERIFICATION DETAILS
   // ======================
+  email_verified_at: transfer.email_verified_at,
+sms_verified_at: transfer.sms_verified_at,
   email_address: transfer.recipient_email,
   telephone_number: transfer.recipient_phone, // set later if you store it
-
+signature_url: signatureSignedUrl,
+signature_date:
+  transfer.receipt_accepted_at ||
+  transfer.sms_verified_at ||
+  transfer.email_verified_at,
   unique_token_id: transfer.download_token,
 
   // ======================

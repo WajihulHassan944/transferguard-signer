@@ -129,15 +129,18 @@ if (data.verification_method === "email_sms") {
       <div class="label">Email Address:</div>
       <div class="value">${escape(data.recipient_email)}</div>
     </div>
-
+ <div class="row">
+    <div class="label">Email Verified At:</div>
+<div class="value">${formatDate(data.email_verified_at)}</div>
+    </div>
     <div class="row">
       <div class="label">Telephone Number:</div>
       <div class="value">${escape(data.telephone_number)}</div>
     </div>
 
     <div class="row">
-      <div class="label">Verification Timestamp:</div>
-      <div class="value">${formatDate(data.verification_timestamp)}</div>
+     <div class="label">SMS Verified At:</div>
+<div class="value">${formatDate(data.sms_verified_at)}</div>
     </div>
 
     <div class="row">
